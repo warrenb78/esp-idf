@@ -17,6 +17,11 @@
 #include "mesh_light.h"
 #include "nvs_flash.h"
 
+typedef struct message_t {
+    int message_index;
+} message_t;
+
+
 /*******************************************************
  *                Macros
  *******************************************************/
@@ -32,8 +37,8 @@
  *******************************************************/
 static const char *MESH_TAG = "mesh_main";
 static const uint8_t MESH_ID[6] = { 0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
-static uint8_t tx_buf[TX_SIZE] = { 0, };
-static uint8_t rx_buf[RX_SIZE] = { 0, };
+static __attribute__((aligned(16))) uint8_t tx_buf[TX_SIZE] = { 0, };
+static __attribute__((aligned(16))) uint8_t rx_buf[RX_SIZE] = { 0, };
 static bool is_running = true;
 static bool is_mesh_connected = false;
 static mesh_addr_t mesh_parent_addr;
@@ -61,6 +66,43 @@ mesh_light_ctl_t light_off = {
 /*******************************************************
  *                Function Definitions
  *******************************************************/
+
+int get_message_count(bool reset)
+{
+    // Count of messages sent
+    static int message_count = 0;
+
+    if (reset) {
+        message_count = 0;
+        return message_count;
+    }
+
+    int res = message_count;
+    ++message_count;
+    return res;
+}
+
+void esp_mesh_non_root_work()
+{
+    message_t message = {.message_index = get_message_count(false)};
+    mesh_data_t data;
+    data.data = (uint8_t *)&message;
+    data.size = sizeof(message);
+    if (data.size > TX_SIZE) {
+        // TX_SIZE matches the MTU of mesh.
+        ESP_LOGE(MESH_TAG, "message to large %u limit %u", data.size, TX_SIZE);
+        return;
+    }
+    data.proto = MESH_PROTO_BIN;
+    data.tos = MESH_TOS_P2P;
+
+    int err = esp_mesh_send(NULL, &data, MESH_DATA_P2P, NULL, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(MESH_TAG, "Got error %d when trying to send to root", err);
+        return;
+    }
+}
+
 void esp_mesh_p2p_tx_main(void *arg)
 {
     int i;
@@ -75,12 +117,18 @@ void esp_mesh_p2p_tx_main(void *arg)
     data.tos = MESH_TOS_P2P;
     is_running = true;
 
+    unsigned char mac_base[6] = {0};
+    esp_efuse_mac_get_default(mac_base);
+    esp_read_mac(mac_base, ESP_MAC_WIFI_STA);
+    ESP_LOGI(MESH_TAG, "mac local base:"MACSTR, MAC2STR(mac_base));
+
     while (is_running) {
         /* non-root do nothing but print */
         if (!esp_mesh_is_root()) {
             ESP_LOGI(MESH_TAG, "layer:%d, rtableSize:%d, %s", mesh_layer,
                      esp_mesh_get_routing_table_size(),
                      (is_mesh_connected && esp_mesh_is_root()) ? "ROOT" : is_mesh_connected ? "NODE" : "DISCONNECT");
+            esp_mesh_non_root_work();
             vTaskDelay(10 * 1000 / portTICK_PERIOD_MS);
             continue;
         }
@@ -102,6 +150,10 @@ void esp_mesh_p2p_tx_main(void *arg)
         }
 
         for (i = 0; i < route_table_size; i++) {
+            // Prevent self send.
+            if (0 == memcmp(&route_table[i], mac_base, sizeof(mac_base)))
+                continue;
+
             err = esp_mesh_send(&route_table[i], &data, MESH_DATA_P2P, NULL, 0);
             if (err) {
                 ESP_LOGE(MESH_TAG,
@@ -146,6 +198,12 @@ void esp_mesh_p2p_rx_main(void *arg)
             ESP_LOGE(MESH_TAG, "err:0x%x, size:%d", err, data.size);
             continue;
         }
+        if (esp_mesh_is_root()) {
+            message_t *message = (message_t *)data.data;
+            ESP_LOGI(MESH_TAG, "Keep alive from:"MACSTR", id %d", MAC2STR(from.addr), message->message_index);
+            continue;
+        }
+
         /* extract send count */
         if (data.size >= sizeof(send_count)) {
             send_count = (data.data[25] << 24) | (data.data[24] << 16)
@@ -154,7 +212,7 @@ void esp_mesh_p2p_rx_main(void *arg)
         recv_count++;
         /* process light control */
         mesh_light_process(&from, data.data, data.size);
-        if (!(recv_count % 1)) {
+        if ((recv_count % 1000) == 0) {
             ESP_LOGW(MESH_TAG,
                      "[#RX:%d/%d][L:%d] parent:"MACSTR", receive from "MACSTR", size:%d, heap:%" PRId32 ", flag:%d[err:0x%x, proto:%d, tos:%d]",
                      recv_count, send_count, mesh_layer,
@@ -202,6 +260,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(MESH_TAG, "<MESH_EVENT_CHILD_CONNECTED>aid:%d, "MACSTR"",
                  child_connected->aid,
                  MAC2STR(child_connected->mac));
+        esp_mesh_comm_p2p_start();
     }
     break;
     case MESH_EVENT_CHILD_DISCONNECTED: {
