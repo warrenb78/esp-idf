@@ -486,10 +486,24 @@ void app_main(void)
     memcpy((uint8_t *) &cfg.mesh_id, MESH_ID, 6);
     /* router */
     cfg.channel = CONFIG_MESH_CHANNEL;
+#ifdef USE_ROUTER
     cfg.router.ssid_len = strlen(CONFIG_MESH_ROUTER_SSID);
     memcpy((uint8_t *) &cfg.router.ssid, CONFIG_MESH_ROUTER_SSID, cfg.router.ssid_len);
     memcpy((uint8_t *) &cfg.router.password, CONFIG_MESH_ROUTER_PASSWD,
            strlen(CONFIG_MESH_ROUTER_PASSWD));
+#else
+    uint8_t root_mac[6] = {0x7c, 0x9e, 0xbd, 0x65, 0x8a, 0x34};
+    
+    unsigned char my_mac[6] = {0};
+    esp_efuse_mac_get_default(my_mac);
+    esp_read_mac(my_mac, ESP_MAC_WIFI_STA);
+
+    if (0 == memcmp(root_mac, my_mac, sizeof(root_mac))) {
+        esp_mesh_set_type(MESH_ROOT);
+    } else {
+        esp_mesh_fix_root(true);
+    }
+#endif
     /* mesh softAP */
     ESP_ERROR_CHECK(esp_mesh_set_ap_authmode(CONFIG_MESH_AP_AUTHMODE));
     cfg.mesh_ap.max_connection = CONFIG_MESH_AP_CONNECTIONS;
