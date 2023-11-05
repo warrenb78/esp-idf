@@ -12,6 +12,10 @@
 
 #include "esp_err.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*******************************************************
  *                Constants
  *******************************************************/
@@ -53,5 +57,9 @@ esp_err_t mesh_light_set(int color);
 esp_err_t mesh_light_process(mesh_addr_t *from, uint8_t *buf, uint16_t len);
 void mesh_connected_indicator(int layer);
 void mesh_disconnected_indicator(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __MESH_LIGHT_H__ */

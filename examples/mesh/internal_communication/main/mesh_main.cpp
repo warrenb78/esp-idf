@@ -6,6 +6,7 @@
    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
    CONDITIONS OF ANY KIND, either express or implied.
 */
+#include <stdint.h>
 #include <string.h>
 #include <inttypes.h>
 #include "esp_wifi.h"
@@ -16,10 +17,7 @@
 #include "esp_mesh_internal.h"
 #include "mesh_light.h"
 #include "nvs_flash.h"
-
-typedef struct message_t {
-    int message_index;
-} message_t;
+#include "command.hpp"
 
 
 /*******************************************************
@@ -67,40 +65,10 @@ mesh_light_ctl_t light_off = {
  *                Function Definitions
  *******************************************************/
 
-int get_message_count(bool reset)
-{
-    // Count of messages sent
-    static int message_count = 0;
-
-    if (reset) {
-        message_count = 0;
-        return message_count;
-    }
-
-    int res = message_count;
-    ++message_count;
-    return res;
-}
-
 void esp_mesh_non_root_work()
 {
-    message_t message = {.message_index = get_message_count(false)};
-    mesh_data_t data;
-    data.data = (uint8_t *)&message;
-    data.size = sizeof(message);
-    if (data.size > TX_SIZE) {
-        // TX_SIZE matches the MTU of mesh.
-        ESP_LOGE(MESH_TAG, "message to large %u limit %u", data.size, TX_SIZE);
-        return;
-    }
-    data.proto = MESH_PROTO_BIN;
-    data.tos = MESH_TOS_P2P;
-
-    int err = esp_mesh_send(NULL, &data, MESH_DATA_P2P, NULL, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(MESH_TAG, "Got error %d when trying to send to root", err);
-        return;
-    }
+    // send keep alives to root.
+    send_keep_alive(NULL);
 }
 
 void esp_mesh_p2p_tx_main(void *arg)
@@ -120,7 +88,7 @@ void esp_mesh_p2p_tx_main(void *arg)
     unsigned char mac_base[6] = {0};
     esp_efuse_mac_get_default(mac_base);
     esp_read_mac(mac_base, ESP_MAC_WIFI_STA);
-    ESP_LOGI(MESH_TAG, "mac local base:"MACSTR, MAC2STR(mac_base));
+    ESP_LOGI(MESH_TAG, "mac local base:" MACSTR, MAC2STR(mac_base));
 
     while (is_running) {
         /* non-root do nothing but print */
@@ -157,13 +125,13 @@ void esp_mesh_p2p_tx_main(void *arg)
             err = esp_mesh_send(&route_table[i], &data, MESH_DATA_P2P, NULL, 0);
             if (err) {
                 ESP_LOGE(MESH_TAG,
-                         "[ROOT-2-UNICAST:%d][L:%d]parent:"MACSTR" to "MACSTR", heap:%" PRId32 "[err:0x%x, proto:%d, tos:%d]",
+                         "[ROOT-2-UNICAST:%d][L:%d]parent:" MACSTR" to " MACSTR", heap:%" PRId32 "[err:0x%x, proto:%d, tos:%d]",
                          send_count, mesh_layer, MAC2STR(mesh_parent_addr.addr),
                          MAC2STR(route_table[i].addr), esp_get_minimum_free_heap_size(),
                          err, data.proto, data.tos);
             } else if (!(send_count % 100)) {
                 ESP_LOGW(MESH_TAG,
-                         "[ROOT-2-UNICAST:%d][L:%d][rtableSize:%d]parent:"MACSTR" to "MACSTR", heap:%" PRId32 "[err:0x%x, proto:%d, tos:%d]",
+                         "[ROOT-2-UNICAST:%d][L:%d][rtableSize:%d]parent:" MACSTR" to " MACSTR", heap:%" PRId32 "[err:0x%x, proto:%d, tos:%d]",
                          send_count, mesh_layer,
                          esp_mesh_get_routing_table_size(),
                          MAC2STR(mesh_parent_addr.addr),
@@ -199,8 +167,7 @@ void esp_mesh_p2p_rx_main(void *arg)
             continue;
         }
         if (esp_mesh_is_root()) {
-            message_t *message = (message_t *)data.data;
-            ESP_LOGI(MESH_TAG, "Keep alive from:"MACSTR", id %d", MAC2STR(from.addr), message->message_index);
+            handle_message(&from, data.data, data.size);
             continue;
         }
 
@@ -214,7 +181,7 @@ void esp_mesh_p2p_rx_main(void *arg)
         mesh_light_process(&from, data.data, data.size);
         if ((recv_count % 1000) == 0) {
             ESP_LOGW(MESH_TAG,
-                     "[#RX:%d/%d][L:%d] parent:"MACSTR", receive from "MACSTR", size:%d, heap:%" PRId32 ", flag:%d[err:0x%x, proto:%d, tos:%d]",
+                     "[#RX:%d/%d][L:%d] parent:" MACSTR", receive from " MACSTR", size:%d, heap:%" PRId32 ", flag:%d[err:0x%x, proto:%d, tos:%d]",
                      recv_count, send_count, mesh_layer,
                      MAC2STR(mesh_parent_addr.addr), MAC2STR(from.addr),
                      data.size, esp_get_minimum_free_heap_size(), flag, err, data.proto,
@@ -244,7 +211,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     switch (event_id) {
     case MESH_EVENT_STARTED: {
         esp_mesh_get_id(&id);
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_MESH_STARTED>ID:"MACSTR"", MAC2STR(id.addr));
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_MESH_STARTED>ID:" MACSTR"", MAC2STR(id.addr));
         is_mesh_connected = false;
         mesh_layer = esp_mesh_get_layer();
     }
@@ -257,7 +224,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     break;
     case MESH_EVENT_CHILD_CONNECTED: {
         mesh_event_child_connected_t *child_connected = (mesh_event_child_connected_t *)event_data;
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_CHILD_CONNECTED>aid:%d, "MACSTR"",
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_CHILD_CONNECTED>aid:%d, " MACSTR"",
                  child_connected->aid,
                  MAC2STR(child_connected->mac));
         esp_mesh_comm_p2p_start();
@@ -265,7 +232,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     break;
     case MESH_EVENT_CHILD_DISCONNECTED: {
         mesh_event_child_disconnected_t *child_disconnected = (mesh_event_child_disconnected_t *)event_data;
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_CHILD_DISCONNECTED>aid:%d, "MACSTR"",
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_CHILD_DISCONNECTED>aid:%d, " MACSTR"",
                  child_disconnected->aid,
                  MAC2STR(child_disconnected->mac));
     }
@@ -297,7 +264,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
         mesh_layer = connected->self_layer;
         memcpy(&mesh_parent_addr.addr, connected->connected.bssid, 6);
         ESP_LOGI(MESH_TAG,
-                 "<MESH_EVENT_PARENT_CONNECTED>layer:%d-->%d, parent:"MACSTR"%s, ID:"MACSTR", duty:%d",
+                 "<MESH_EVENT_PARENT_CONNECTED>layer:%d-->%d, parent:" MACSTR"%s, ID:" MACSTR", duty:%d",
                  last_layer, mesh_layer, MAC2STR(mesh_parent_addr.addr),
                  esp_mesh_is_root() ? "<ROOT>" :
                  (mesh_layer == 2) ? "<layer2>" : "", MAC2STR(id.addr), connected->duty);
@@ -334,14 +301,14 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     break;
     case MESH_EVENT_ROOT_ADDRESS: {
         mesh_event_root_address_t *root_addr = (mesh_event_root_address_t *)event_data;
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_ROOT_ADDRESS>root address:"MACSTR"",
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_ROOT_ADDRESS>root address:" MACSTR"",
                  MAC2STR(root_addr->addr));
     }
     break;
     case MESH_EVENT_VOTE_STARTED: {
         mesh_event_vote_started_t *vote_started = (mesh_event_vote_started_t *)event_data;
         ESP_LOGI(MESH_TAG,
-                 "<MESH_EVENT_VOTE_STARTED>attempts:%d, reason:%d, rc_addr:"MACSTR"",
+                 "<MESH_EVENT_VOTE_STARTED>attempts:%d, reason:%d, rc_addr:" MACSTR"",
                  vote_started->attempts,
                  vote_started->reason,
                  MAC2STR(vote_started->rc_addr.addr));
@@ -354,7 +321,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     case MESH_EVENT_ROOT_SWITCH_REQ: {
         mesh_event_root_switch_req_t *switch_req = (mesh_event_root_switch_req_t *)event_data;
         ESP_LOGI(MESH_TAG,
-                 "<MESH_EVENT_ROOT_SWITCH_REQ>reason:%d, rc_addr:"MACSTR"",
+                 "<MESH_EVENT_ROOT_SWITCH_REQ>reason:%d, rc_addr:" MACSTR"",
                  switch_req->reason,
                  MAC2STR( switch_req->rc_addr.addr));
     }
@@ -363,7 +330,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
         /* new root */
         mesh_layer = esp_mesh_get_layer();
         esp_mesh_get_parent_bssid(&mesh_parent_addr);
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_ROOT_SWITCH_ACK>layer:%d, parent:"MACSTR"", mesh_layer, MAC2STR(mesh_parent_addr.addr));
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_ROOT_SWITCH_ACK>layer:%d, parent:" MACSTR"", mesh_layer, MAC2STR(mesh_parent_addr.addr));
     }
     break;
     case MESH_EVENT_TODS_STATE: {
@@ -380,7 +347,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     case MESH_EVENT_ROOT_ASKED_YIELD: {
         mesh_event_root_conflict_t *root_conflict = (mesh_event_root_conflict_t *)event_data;
         ESP_LOGI(MESH_TAG,
-                 "<MESH_EVENT_ROOT_ASKED_YIELD>"MACSTR", rssi:%d, capacity:%d",
+                 "<MESH_EVENT_ROOT_ASKED_YIELD>" MACSTR", rssi:%d, capacity:%d",
                  MAC2STR(root_conflict->addr),
                  root_conflict->rssi,
                  root_conflict->capacity);
@@ -409,13 +376,13 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     break;
     case MESH_EVENT_FIND_NETWORK: {
         mesh_event_find_network_t *find_network = (mesh_event_find_network_t *)event_data;
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_FIND_NETWORK>new channel:%d, router BSSID:"MACSTR"",
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_FIND_NETWORK>new channel:%d, router BSSID:" MACSTR"",
                  find_network->channel, MAC2STR(find_network->router_bssid));
     }
     break;
     case MESH_EVENT_ROUTER_SWITCH: {
         mesh_event_router_switch_t *router_switch = (mesh_event_router_switch_t *)event_data;
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_ROUTER_SWITCH>new router:%s, channel:%d, "MACSTR"",
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_ROUTER_SWITCH>new router:%s, channel:%d, " MACSTR"",
                  router_switch->ssid, router_switch->channel, MAC2STR(router_switch->bssid));
     }
     break;
@@ -426,7 +393,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
     break;
     case MESH_EVENT_PS_CHILD_DUTY: {
         mesh_event_ps_duty_t *ps_duty = (mesh_event_ps_duty_t *)event_data;
-        ESP_LOGI(MESH_TAG, "<MESH_EVENT_PS_CHILD_DUTY>cidx:%d, "MACSTR", duty:%d", ps_duty->child_connected.aid-1,
+        ESP_LOGI(MESH_TAG, "<MESH_EVENT_PS_CHILD_DUTY>cidx:%d, " MACSTR", duty:%d", ps_duty->child_connected.aid-1,
                 MAC2STR(ps_duty->child_connected.mac), ps_duty->duty);
     }
     break;
@@ -444,7 +411,7 @@ void ip_event_handler(void *arg, esp_event_base_t event_base,
 
 }
 
-void app_main(void)
+extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(mesh_light_init());
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -464,7 +431,8 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_mesh_init());
     ESP_ERROR_CHECK(esp_event_handler_register(MESH_EVENT, ESP_EVENT_ANY_ID, &mesh_event_handler, NULL));
     /*  set mesh topology */
-    ESP_ERROR_CHECK(esp_mesh_set_topology(CONFIG_MESH_TOPOLOGY));
+    ESP_ERROR_CHECK(esp_mesh_set_topology(
+        static_cast<esp_mesh_topology_t>(CONFIG_MESH_TOPOLOGY)));
     /*  set mesh max layer according to the topology */
     ESP_ERROR_CHECK(esp_mesh_set_max_layer(CONFIG_MESH_MAX_LAYER));
     ESP_ERROR_CHECK(esp_mesh_set_vote_percentage(1));
@@ -505,7 +473,8 @@ void app_main(void)
     }
 #endif
     /* mesh softAP */
-    ESP_ERROR_CHECK(esp_mesh_set_ap_authmode(CONFIG_MESH_AP_AUTHMODE));
+    ESP_ERROR_CHECK(esp_mesh_set_ap_authmode(
+        static_cast<wifi_auth_mode_t>(CONFIG_MESH_AP_AUTHMODE)));
     cfg.mesh_ap.max_connection = CONFIG_MESH_AP_CONNECTIONS;
     cfg.mesh_ap.nonmesh_max_connection = CONFIG_MESH_NON_MESH_AP_CONNECTIONS;
     memcpy((uint8_t *) &cfg.mesh_ap.password, CONFIG_MESH_AP_PASSWD,
