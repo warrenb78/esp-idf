@@ -96,7 +96,6 @@ void esp_mesh_p2p_tx_main(void *arg)
             ESP_LOGI(MESH_TAG, "layer:%d, rtableSize:%d, %s", mesh_layer,
                      esp_mesh_get_routing_table_size(),
                      (is_mesh_connected && esp_mesh_is_root()) ? "ROOT" : is_mesh_connected ? "NODE" : "DISCONNECT");
-            esp_mesh_non_root_work();
             vTaskDelay(10 * 1000 / portTICK_PERIOD_MS);
             continue;
         }
@@ -107,10 +106,7 @@ void esp_mesh_p2p_tx_main(void *arg)
                      esp_mesh_get_routing_table_size(), send_count);
         }
         send_count++;
-        tx_buf[25] = (send_count >> 24) & 0xff;
-        tx_buf[24] = (send_count >> 16) & 0xff;
-        tx_buf[23] = (send_count >> 8) & 0xff;
-        tx_buf[22] = (send_count >> 0) & 0xff;
+
         if (send_count % 2) {
             memcpy(tx_buf, (uint8_t *)&light_on, sizeof(light_on));
         } else {
@@ -198,6 +194,7 @@ esp_err_t esp_mesh_comm_p2p_start(void)
         is_comm_p2p_started = true;
         xTaskCreate(esp_mesh_p2p_tx_main, "MPTX", 3072, NULL, 5, NULL);
         xTaskCreate(esp_mesh_p2p_rx_main, "MPRX", 3072, NULL, 5, NULL);
+        xTaskCreate(keep_alive_task, "MPKeepAlive", 3072, nullptr, 5, nullptr);
     }
     return ESP_OK;
 }

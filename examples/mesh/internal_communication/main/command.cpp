@@ -1,3 +1,5 @@
+#include <atomic>
+
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_mesh.h"
@@ -7,6 +9,53 @@
 
 static const char *COMMAND_TAG = "command";
 
+uint32_t get_message_count(bool reset);
+
+class keep_aliver {
+public:
+    void stop() {
+        _do_work = false;
+    }
+
+    void start(start_keep_alive_data start_data) {
+        _do_work = true;
+        _delay_ms = start_data.delay_ms;
+        _send_to_root = to_bool(start_data.send_to_root);
+        memcpy(_target.addr, start_data.target_mac, sizeof(start_data.target_mac));
+        if (to_bool(start_data.reset_index))
+            get_message_count(true);
+    }
+
+    void main_loop() {
+        while (true) {
+            if (_do_work) {
+                const auto *target = [&]() -> const mesh_addr_t *{
+                    if (_send_to_root) {
+                        return nullptr;   
+                    }
+                    return &_target;
+                }();
+                send_keep_alive(target);
+                vTaskDelay(_delay_ms / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                vTaskDelay(10000 / portTICK_PERIOD_MS);
+            }
+        }
+    }
+private:
+    std::atomic<bool> _do_work = false;
+    uint32_t _delay_ms;
+    bool _send_to_root;
+    mesh_addr_t _target;
+};
+
+keep_aliver g_keep_alive;
+
+void keep_alive_task(void *arg) {
+    (void)arg;
+    g_keep_alive.main_loop();
+}
 
 uint32_t get_message_count(bool reset)
 {
@@ -58,6 +107,12 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             ESP_LOGI(COMMAND_TAG, "message %s from:" MACSTR ", id %lu",
                      message_name, MAC2STR(from->addr),
                      message->keep_alive.message_index);
+            break;
+        case message_type::START_KEEP_ALIVE: 
+            g_keep_alive.start(message->start_keep_alive);
+            break;
+        case message_type::STOP_KEEP_ALIVE:
+            g_keep_alive.stop();
             break;
     }
     return ESP_OK;
