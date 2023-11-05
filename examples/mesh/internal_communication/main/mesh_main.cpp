@@ -74,15 +74,9 @@ void esp_mesh_non_root_work()
 void esp_mesh_p2p_tx_main(void *arg)
 {
     int i;
-    esp_err_t err;
     int send_count = 0;
     mesh_addr_t route_table[CONFIG_MESH_ROUTE_TABLE_SIZE];
     int route_table_size = 0;
-    mesh_data_t data;
-    data.data = tx_buf;
-    data.size = sizeof(tx_buf);
-    data.proto = MESH_PROTO_BIN;
-    data.tos = MESH_TOS_P2P;
     is_running = true;
 
     unsigned char mac_base[6] = {0};
@@ -107,37 +101,32 @@ void esp_mesh_p2p_tx_main(void *arg)
         }
         send_count++;
 
-        if (send_count % 2) {
-            memcpy(tx_buf, (uint8_t *)&light_on, sizeof(light_on));
-        } else {
-            memcpy(tx_buf, (uint8_t *)&light_off, sizeof(light_off));
-        }
+        start_keep_alive_data start_keep_alive{
+            .reset_index = my_bool::TRUE,
+            .delay_ms = 10,
+            .send_to_root = my_bool::TRUE,
+            .target_mac{},
+        };
 
         for (i = 0; i < route_table_size; i++) {
             // Prevent self send.
             if (0 == memcmp(&route_table[i], mac_base, sizeof(mac_base)))
                 continue;
-
-            err = esp_mesh_send(&route_table[i], &data, MESH_DATA_P2P, NULL, 0);
-            if (err) {
-                ESP_LOGE(MESH_TAG,
-                         "[ROOT-2-UNICAST:%d][L:%d]parent:" MACSTR" to " MACSTR", heap:%" PRId32 "[err:0x%x, proto:%d, tos:%d]",
-                         send_count, mesh_layer, MAC2STR(mesh_parent_addr.addr),
-                         MAC2STR(route_table[i].addr), esp_get_minimum_free_heap_size(),
-                         err, data.proto, data.tos);
-            } else if (!(send_count % 100)) {
-                ESP_LOGW(MESH_TAG,
-                         "[ROOT-2-UNICAST:%d][L:%d][rtableSize:%d]parent:" MACSTR" to " MACSTR", heap:%" PRId32 "[err:0x%x, proto:%d, tos:%d]",
-                         send_count, mesh_layer,
-                         esp_mesh_get_routing_table_size(),
-                         MAC2STR(mesh_parent_addr.addr),
-                         MAC2STR(route_table[i].addr), esp_get_minimum_free_heap_size(),
-                         err, data.proto, data.tos);
+    
+            if ((send_count % 200) == 0) {
+                send_start_keep_alive(&route_table[i], start_keep_alive);
+            } else if ((send_count % 100) == 0) {
+                send_stop_keep_alive(&route_table[i]);
             }
         }
+        if ((send_count % 100) != 0) {
+            vTaskDelay(1 * 100 / portTICK_PERIOD_MS);
+            continue;
+        }
+            
         /* if route_table_size is less than 10, add delay to avoid watchdog in this task. */
         if (route_table_size < 10) {
-            vTaskDelay(1 * 1000 / portTICK_PERIOD_MS);
+            vTaskDelay(1 * 100 / portTICK_PERIOD_MS);
         }
     }
     vTaskDelete(NULL);
@@ -145,10 +134,8 @@ void esp_mesh_p2p_tx_main(void *arg)
 
 void esp_mesh_p2p_rx_main(void *arg)
 {
-    int recv_count = 0;
     esp_err_t err;
     mesh_addr_t from;
-    int send_count = 0;
     mesh_data_t data;
     int flag = 0;
     data.data = rx_buf;
@@ -162,27 +149,9 @@ void esp_mesh_p2p_rx_main(void *arg)
             ESP_LOGE(MESH_TAG, "err:0x%x, size:%d", err, data.size);
             continue;
         }
-        if (esp_mesh_is_root()) {
-            handle_message(&from, data.data, data.size);
-            continue;
-        }
 
-        /* extract send count */
-        if (data.size >= sizeof(send_count)) {
-            send_count = (data.data[25] << 24) | (data.data[24] << 16)
-                         | (data.data[23] << 8) | data.data[22];
-        }
-        recv_count++;
-        /* process light control */
-        mesh_light_process(&from, data.data, data.size);
-        if ((recv_count % 1000) == 0) {
-            ESP_LOGW(MESH_TAG,
-                     "[#RX:%d/%d][L:%d] parent:" MACSTR", receive from " MACSTR", size:%d, heap:%" PRId32 ", flag:%d[err:0x%x, proto:%d, tos:%d]",
-                     recv_count, send_count, mesh_layer,
-                     MAC2STR(mesh_parent_addr.addr), MAC2STR(from.addr),
-                     data.size, esp_get_minimum_free_heap_size(), flag, err, data.proto,
-                     data.tos);
-        }
+        handle_message(&from, data.data, data.size);
+        continue;
     }
     vTaskDelete(NULL);
 }

@@ -3,4 +3,4 @@ idf_component_register(SRCS "mesh_light.c"
                             "command.cpp"
                     INCLUDE_DIRS "." "include")
 
-add_compile_options( -Wmissing-field-initializers)
+component_compile_options(-Wmissing-field-initializers)

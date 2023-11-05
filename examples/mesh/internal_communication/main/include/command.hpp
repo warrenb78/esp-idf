@@ -45,6 +45,7 @@ inline constexpr const char * type_to_name(message_type type) {
 
 struct keep_alive_data {
     uint32_t message_index;
+    uint64_t timestamp;
 };
 
 struct start_keep_alive_data {
