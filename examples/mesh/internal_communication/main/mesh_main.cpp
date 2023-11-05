@@ -65,12 +65,6 @@ mesh_light_ctl_t light_off = {
  *                Function Definitions
  *******************************************************/
 
-void esp_mesh_non_root_work()
-{
-    // send keep alives to root.
-    send_keep_alive(NULL);
-}
-
 void esp_mesh_p2p_tx_main(void *arg)
 {
     int i;
@@ -103,7 +97,7 @@ void esp_mesh_p2p_tx_main(void *arg)
 
         start_keep_alive_data start_keep_alive{
             .reset_index = my_bool::TRUE,
-            .delay_ms = 10,
+            .delay_ms = 100,
             .send_to_root = my_bool::TRUE,
             .target_mac{},
         };
@@ -113,6 +107,11 @@ void esp_mesh_p2p_tx_main(void *arg)
             if (0 == memcmp(&route_table[i], mac_base, sizeof(mac_base)))
                 continue;
     
+            if ((send_count % 600) == 0) {
+                send_go_to_sleep(&route_table[i], {.sleep_time_ms = 10000});
+                continue;
+            } 
+            
             if ((send_count % 200) == 0) {
                 send_start_keep_alive(&route_table[i], start_keep_alive);
             } else if ((send_count % 100) == 0) {
@@ -146,8 +145,8 @@ void esp_mesh_p2p_rx_main(void *arg)
         data.size = RX_SIZE;
         err = esp_mesh_recv(&from, &data, portMAX_DELAY, &flag, NULL, 0);
         if (err != ESP_OK || !data.size) {
-            ESP_LOGE(MESH_TAG, "err:0x%x, size:%d", err, data.size);
-            continue;
+            ESP_LOGE(MESH_TAG, "line: %d err:0x%x, size:%d", __LINE__, err, data.size);
+            break;
         }
 
         handle_message(&from, data.data, data.size);
@@ -377,23 +376,9 @@ void ip_event_handler(void *arg, esp_event_base_t event_base,
 
 }
 
-extern "C" void app_main(void)
+void app_mesh_start()
 {
-    ESP_ERROR_CHECK(mesh_light_init());
-    ESP_ERROR_CHECK(nvs_flash_init());
-    /*  tcpip initialization */
-    ESP_ERROR_CHECK(esp_netif_init());
-    /*  event initialization */
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    /*  create network interfaces for mesh (only station instance saved for further manipulation, soft AP instance ignored */
-    ESP_ERROR_CHECK(esp_netif_create_default_wifi_mesh_netifs(&netif_sta, NULL));
-    /*  wifi initialization */
-    wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&config));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    /*  mesh initialization */
+/*  mesh initialization */
     ESP_ERROR_CHECK(esp_mesh_init());
     ESP_ERROR_CHECK(esp_event_handler_register(MESH_EVENT, ESP_EVENT_ANY_ID, &mesh_event_handler, NULL));
     /*  set mesh topology */
@@ -407,7 +392,7 @@ extern "C" void app_main(void)
     /* Enable mesh PS function */
     ESP_ERROR_CHECK(esp_mesh_enable_ps());
     /* better to increase the associate expired time, if a small duty cycle is set. */
-    ESP_ERROR_CHECK(esp_mesh_set_ap_assoc_expire(60));
+    ESP_ERROR_CHECK(esp_mesh_set_ap_assoc_expire(10));
     /* better to increase the announce interval to avoid too much management traffic, if a small duty cycle is set. */
     ESP_ERROR_CHECK(esp_mesh_set_announce_interval(600, 3300));
 #else
@@ -457,4 +442,23 @@ extern "C" void app_main(void)
     ESP_LOGI(MESH_TAG, "mesh starts successfully, heap:%" PRId32 ", %s<%d>%s, ps:%d",  esp_get_minimum_free_heap_size(),
              esp_mesh_is_root_fixed() ? "root fixed" : "root not fixed",
              esp_mesh_get_topology(), esp_mesh_get_topology() ? "(chain)":"(tree)", esp_mesh_is_ps_enabled());
+}
+
+extern "C" void app_main(void)
+{
+    ESP_ERROR_CHECK(mesh_light_init());
+    ESP_ERROR_CHECK(nvs_flash_init());
+    /*  tcpip initialization */
+    ESP_ERROR_CHECK(esp_netif_init());
+    /*  event initialization */
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    /*  create network interfaces for mesh (only station instance saved for further manipulation, soft AP instance ignored */
+    ESP_ERROR_CHECK(esp_netif_create_default_wifi_mesh_netifs(&netif_sta, NULL));
+    /*  wifi initialization */
+    wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&config));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    app_mesh_start();
 }

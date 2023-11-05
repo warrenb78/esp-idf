@@ -7,6 +7,7 @@
 #include "esp_mesh_internal.h"
 
 #include "command.hpp"
+#include "general.hpp"
 
 static const char *COMMAND_TAG = "command";
 
@@ -42,7 +43,7 @@ public:
                 vTaskDelay(_delay_ms / portTICK_PERIOD_MS);
                 continue;
             } else {
-                vTaskDelay(10000 / portTICK_PERIOD_MS);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
             }
         }
     }
@@ -100,11 +101,16 @@ int send_message(const mesh_addr_t *to, message_t &message){
 
 int send_keep_alive(const mesh_addr_t *to)
 {
+    int rssi = 0;
+    int err = esp_wifi_sta_get_rssi(&rssi);
+    if (err)
+        return err;
     message_t message = {
         .type = message_type::KEEP_ALIVE,
         .keep_alive = {
             .message_index = get_message_count(false),
             .timestamp = esp_timer_get_time() / 1000ull,
+            .rssi = rssi, 
         },
     };
     return send_message(to, message);
@@ -128,6 +134,15 @@ int send_stop_keep_alive(const mesh_addr_t *to)
     return send_message(to, message);
 }
 
+int send_go_to_sleep(const mesh_addr_t *to, go_to_sleep_data go_to_sleep)
+{
+    message_t message = {
+        .type = message_type::GO_TO_SLEEP,
+        .go_to_sleep = go_to_sleep,
+    };
+    return send_message(to, message);
+}
+
 int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 {
     const auto *message = reinterpret_cast<const message_t *>(buff);
@@ -135,9 +150,10 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
     // ESP_LOGI(COMMAND_TAG, "message %s from: " MACSTR, message_name, MAC2STR(from->addr));
     switch (message->type) {
         case message_type::KEEP_ALIVE:
-            ESP_LOGI(COMMAND_TAG, "message %s from:" MACSTR ", id %lu timestamp %llu ms",
+            ESP_LOGI(COMMAND_TAG, "message %s from:" MACSTR ", id %lu timestamp %llu ms, rssi %lld",
                      message_name, MAC2STR(from->addr),
-                     message->keep_alive.message_index, message->keep_alive.timestamp);
+                     message->keep_alive.message_index, message->keep_alive.timestamp,
+                     message->keep_alive.rssi);
             break;
         case message_type::START_KEEP_ALIVE: 
             g_keep_alive.start(message->start_keep_alive);
@@ -145,6 +161,17 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
         case message_type::STOP_KEEP_ALIVE:
             g_keep_alive.stop();
             break;
+        case message_type::GO_TO_SLEEP: {
+            ESP_LOGW(COMMAND_TAG, "message %s from: " MACSTR " going to sleep for %llu ms",
+                     message_name, MAC2STR(from->addr), message->go_to_sleep.sleep_time_ms);
+            g_keep_alive.stop();
+            esp_mesh_stop();
+            vTaskDelay(message->go_to_sleep.sleep_time_ms / portTICK_PERIOD_MS);
+            ESP_LOGW(COMMAND_TAG, "message %s from: " MACSTR " waking up",
+                     message_name, MAC2STR(from->addr));
+            app_mesh_start();
+            break;
+        }
     }
     return ESP_OK;
 }
