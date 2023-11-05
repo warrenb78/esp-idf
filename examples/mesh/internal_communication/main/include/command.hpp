@@ -88,6 +88,8 @@ int send_go_to_sleep(const mesh_addr_t *to, go_to_sleep_data go_to_sleep);
 
 void keep_alive_task(void *arg);
 
+void print_statistics();
+
 int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size);
 
 #endif // __MESH_COMMAND_HPP__

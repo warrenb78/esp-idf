@@ -102,6 +102,10 @@ void esp_mesh_p2p_tx_main(void *arg)
             .target_mac{},
         };
 
+        if ((send_count % 1000) == 0) {
+            print_statistics();
+        }
+
         for (i = 0; i < route_table_size; i++) {
             // Prevent self send.
             if (0 == memcmp(&route_table[i], mac_base, sizeof(mac_base)))
