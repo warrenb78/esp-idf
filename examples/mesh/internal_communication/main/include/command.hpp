@@ -17,6 +17,8 @@ enum class message_type : uint32_t {
     GO_TO_SLEEP,
     GET_NODES,
     GET_NODES_REPLY,
+    GET_STATISTICS,
+    GET_STATISTICS_REPLY,
 };
 
 enum class my_bool : uint8_t {
@@ -51,10 +53,13 @@ inline constexpr const char * type_to_name(message_type type) {
             return "get_nodes";
         case message_type::GET_NODES_REPLY:
             return "get_nodes_reply";
+        case message_type::GET_STATISTICS:
+            return "get_statistics";
+        case message_type::GET_STATISTICS_REPLY:
+            return "get_statistics_reply";
     }
     return "invalid_type";
 }
-
 
 struct keep_alive_data {
     uint32_t message_index;
@@ -89,6 +94,26 @@ struct get_nodes_reply_data {
     mesh_addr_t nodes[MAX_NODES];
 };
 
+struct statistics_node_info {
+    uint64_t first_message_ms;
+    uint64_t last_keep_alive_ms;
+    uint64_t last_keep_alive_far_ms;
+    uint64_t total_bytes_sent;
+    uint64_t count_of_message;
+    uint8_t mac[6];
+    uint8_t parent_mac[6];
+    uint8_t layer;
+    uint64_t missed_messages;
+    int64_t last_rssi;
+};
+
+struct statistics_tree_info_data {
+    constexpr static std::size_t MAX_NODES = 15;
+
+    uint8_t num_nodes;
+    statistics_node_info nodes[MAX_NODES];
+};
+
 struct message_t {
     message_type type;
     uint16_t len = 0;
@@ -98,6 +123,7 @@ struct message_t {
         stop_keep_alive_data stop_keep_alive;
         go_to_sleep_data go_to_sleep;
         get_nodes_reply_data get_nodes_reply;
+        statistics_tree_info_data statistics_tree_info;
     };
 };
 

@@ -2,6 +2,7 @@ import argparse
 import sys
 from construct import *
 import serial
+import itertools
 
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
@@ -14,7 +15,10 @@ MessageType = Enum(Int32ul,
         STOP_KEEP_ALIVE = 2,
         BECOME_ROOT = 3,
         GO_TO_SLEEP = 4,
-        GET_NODES = 5)
+        GET_NODES = 5,
+        GET_NODES_REPLY = 6,
+        GET_STATISTICS = 7,
+        GET_STATISTICS_REPLY = 8,)
 
 MessageHeader = Struct(
     "cmd" / MessageType,
@@ -27,9 +31,29 @@ Message = Struct(
 
 Mac = Array(6, Byte)
 
+MAX_NODES = 15
+
 GetNodesReply = Struct(
     "num_nodes" / Int8ul,
-    "nodes" / Array(15, Mac)
+    "nodes" / Array(MAX_NODES, Mac)
+)
+
+StatisticsNodeInfo = Struct(
+    "first_message_ms" / Int64ul,
+    "last_keep_alive_ms" / Int64ul,
+    "last_keep_alive_far_ms" / Int64ul,
+    "total_bytes_sent" / Int64ul,
+    "count_of_messages" / Int64ul,
+    "mac" / Mac,
+    "parent_mac" / Mac,
+    "layer" / Int8ul,
+    "missed_messages" / Int64ul,
+    "last_rssi" / Int64sl,
+)
+
+StatisticsTreeInfo = Struct(
+    "num_nodes" / Int8ul,
+    "nodes" / Array(MAX_NODES, StatisticsNodeInfo)
 )
 
 class Commander:
@@ -57,28 +81,29 @@ class Commander:
             mac = Mac.parse(mac)
             print(f"{dev_id:2} - {mac[0]:02X}:{mac[1]:02X}:{mac[2]:02X}:{mac[3]:02X}:{mac[4]:02X}:{mac[5]:02X}")
 
-    def send_become_root(self):
-        b = self.format.build(dict(header = dict(cmd=MessageType.BECOME_ROOT, len=0), buf=b""))
+    def _send_empty_command(self, cmd):
+        b = self.format.build(dict(header = dict(cmd=cmd, len=0), buf=b""))
         print(b)
         self.s.write(b)
+
+    def send_become_root(self):
+        self._send_empty_command(MessageType.BECOME_ROOT)
 
     def send_start_keep_alive(self):
-        b = self.format.build(dict(header = dict(cmd=MessageType.START_KEEP_ALIVE, len=0), buf=b""))
-        print(b)
-        self.s.write(b)
+        self._send_empty_command(MessageType.START_KEEP_ALIVE)
 
-    def send_get_nodes(self):
-        b = self.format.build(dict(header = dict(cmd=MessageType.GET_NODES, len=0), buf=b""))
-        print(b)
-        self.s.write(b)
+    def _recv_message(self):
         arr = self.s.read(MessageHeader.sizeof())
         header = MessageHeader.parse(arr)
-        print(f"got {MessageHeader.sizeof()} bytes to read {header.len}")
         arr = self.s.read(header.len)
+        print(f"got {MessageHeader.sizeof()} bytes to read {header.len}")
+        return arr
+
+    def send_get_nodes(self):
+        self._send_empty_command(MessageType.GET_NODES)
+        arr = self._recv_message()
         res = GetNodesReply.parse(arr)
         print(f"number of nodes {res.num_nodes}")
-        mac_size = 6
-        # macs = [tuple(arr[i: i+mac_size]) for i in range(0, len(arr), mac_size)]
         for i, mac in enumerate(res.nodes):
             if i >= res.num_nodes:
                 break
@@ -87,3 +112,21 @@ class Commander:
                 self.mac_to_id[mac] = self.count
                 self.id_to_mac[self.count] = mac
                 self.count += 1
+
+    def send_get_statistics(self):
+        self._send_empty_command(MessageType.GET_STATISTICS)
+        arr = self._recv_message()
+        res = StatisticsTreeInfo.parse(arr)
+        print(f"number of nodes {res.num_nodes}")
+        if res.num_nodes == 0:
+            return
+        tree = dict()
+        childs = set()
+        for node_info in itertools.islice(res.nodes, res.num_nodes):
+            tree.setdefault(tuple(node_info.parent_mac), []).append(node_info)
+            childs.add(tuple(node_info.mac))
+
+        root_set = list(set(tree.keys()) - childs)
+        assert len(root_set) == 1
+
+        print(f"root mac {Mac.build(root_set[0])}")

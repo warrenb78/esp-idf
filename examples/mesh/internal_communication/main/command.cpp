@@ -146,10 +146,20 @@ public:
     public:
         mutex() {
             _l = xSemaphoreCreateBinaryStatic(&_sem);
+            give();
         }
 
-        void take() {
-            xSemaphoreTake(_l, 100000 / portTICK_PERIOD_MS);
+        mutex(const mutex &) = delete;
+        mutex& operator=(const mutex &) = delete;
+        mutex(mutex &&) = default;
+        mutex& operator=(mutex &&) = default;
+
+        bool take(uint64_t delay_ms=10000) {
+            if (pdTRUE != xSemaphoreTake(_l, delay_ms / portTICK_PERIOD_MS)) {
+                ESP_LOGI(TAG, "Failed take");
+                return false;
+            }
+            return true;
         }
 
         void give() {
@@ -164,13 +174,20 @@ public:
     class unique_lock {
         public:
             explicit unique_lock(mutex &l) : _l(l) {
-                _l.take();
+                _taken = _l.take();
             }
 
+            unique_lock(const unique_lock &) = delete;
+            unique_lock& operator=(const unique_lock &) = delete;
+            unique_lock(unique_lock &&) = default;
+            unique_lock& operator=(unique_lock &&) = default;
+
             ~unique_lock() {
-                _l.give();
+                if (_taken)
+                    _l.give();
             }
         private:
+            bool _taken;
             mutex &_l;
     };
 
@@ -355,6 +372,63 @@ void handle_keep_alive(const mesh_addr_t *from, const message_t *message, size_t
             keep_alive.message_index, keep_alive.timestamp, keep_alive.rssi);
 }
 
+void handle_get_nodes()
+{
+    message_t &nodes_reply = *reinterpret_cast<message_t *>(tx_buf);
+    nodes_reply = {
+        .type = message_type::GET_NODES_REPLY,
+        .len = sizeof(get_nodes_reply_data),
+        .get_nodes_reply{},
+    };
+    auto &get_nodes_reply = nodes_reply.get_nodes_reply;
+    int num_nodes = 0;
+    int err = esp_mesh_get_routing_table(
+        get_nodes_reply.nodes, std::size(get_nodes_reply.nodes), &num_nodes);
+    if (err) {
+        ESP_LOGE(TAG, "Failed get routing table %d", err);
+        get_nodes_reply.num_nodes = 0;
+    } else {
+        get_nodes_reply.num_nodes = static_cast<uint8_t>(num_nodes);
+    }
+
+    send_uart_bytes((uint8_t *)&nodes_reply, sizeof(get_nodes_reply) + header_size);
+}
+
+void handle_get_statistics()
+{
+    message_t &reply = *reinterpret_cast<message_t *>(tx_buf);
+    reply = {
+        .type = message_type::GET_STATISTICS_REPLY,
+        .len = sizeof(statistics_tree_info_data),
+        .statistics_tree_info{},
+    };
+    auto &tree_info = reply.statistics_tree_info;
+    statistics &state = statistics::get_state();
+    {
+        ESP_LOGI(TAG, "got into get statistics");
+        auto guard = state.lock();
+        ESP_LOGI(TAG, "got lock statistics");
+        uint32_t i = 0;
+        for (const auto &[mac, src_info] : state) {
+            auto &node_info = tree_info.nodes[i];
+            memcpy(node_info.mac, mac.addr, sizeof(node_info.mac));
+            memcpy(node_info.parent_mac, src_info.parent, sizeof(node_info.parent_mac));
+            node_info.first_message_ms = src_info.first_message_ms;
+            node_info.last_keep_alive_ms = src_info.last_keep_alive_timestamp_ms;
+            node_info.last_keep_alive_far_ms = src_info.last_keep_alive_far_timestamp_ms;
+            node_info.total_bytes_sent = src_info.total_bytes_sent;
+            node_info.count_of_message = src_info.count_of_commands;
+            node_info.layer = src_info.layer;
+            node_info.missed_messages = src_info.missed_messages;
+            node_info.last_rssi = src_info.last_rssi;
+            ++i;
+        }
+        tree_info.num_nodes = i;
+    }
+    ESP_LOGI(TAG, "finished loop");
+    send_uart_bytes((uint8_t *)&reply, sizeof(tree_info) + header_size);
+}
+
 int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 {
     const auto *message = reinterpret_cast<const message_t *>(buff);
@@ -389,21 +463,15 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
         case message_type::BECOME_ROOT:
             esp_mesh_set_type(MESH_ROOT);
             break;
-        case message_type::GET_NODES: {
-            message_t nodes_reply{
-                .type = message_type::GET_NODES_REPLY,
-                .len = sizeof(get_nodes_reply_data),
-                .get_nodes_reply{},
-            };
-            auto &get_nodes_reply = nodes_reply.get_nodes_reply;
-            int num_nodes = 0;
-            ESP_ERROR_CHECK(esp_mesh_get_routing_table(
-                get_nodes_reply.nodes, std::size(get_nodes_reply.nodes), &num_nodes));
-            get_nodes_reply.num_nodes = static_cast<uint8_t>(num_nodes);
-            send_uart_bytes((uint8_t *)&nodes_reply, sizeof(nodes_reply));
+        case message_type::GET_NODES:
+            handle_get_nodes();
+            break;
+        case message_type::GET_STATISTICS: {
+            handle_get_statistics();
             break;
         }
         case message_type::GET_NODES_REPLY:
+        case message_type::GET_STATISTICS_REPLY:
             ESP_LOGW(TAG, "got non relevant message %s", message_name);
             break;
     }
