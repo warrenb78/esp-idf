@@ -35,7 +35,7 @@
  *                Variable Definitions
  *******************************************************/
 static const char *MESH_TAG = "mesh_main";
-static const uint8_t MESH_ID[6] = { 0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
+static const uint8_t MESH_ID[6] = { 0x77, 0x77, 0x77, 0x77, 0x77, 0x78};
 static __attribute__((aligned(16))) uint8_t rx_buf[RX_SIZE] = { 0, };
 static bool is_running = true;
 static bool is_mesh_connected = false;
@@ -103,7 +103,7 @@ void esp_mesh_p2p_tx_main(void *arg)
             .target_mac{},
         };
 
-        if ((send_count % 1000) == 0) {
+        if ((send_count % 250) == 0) {
             print_statistics();
         }
 
@@ -112,14 +112,14 @@ void esp_mesh_p2p_tx_main(void *arg)
             if (0 == memcmp(&route_table[i], mac_base, sizeof(mac_base)))
                 continue;
     
-            if ((send_count % 600) == 0) {
+            if ((send_count % 1000) == 0) {
                 send_go_to_sleep(&route_table[i], {.sleep_time_ms = 10000});
                 continue;
             } 
             
-            if ((send_count % 200) == 0) {
+            if ((send_count % 500) == 0) {
                 send_start_keep_alive(&route_table[i], start_keep_alive);
-            } else if ((send_count % 100) == 0) {
+            } else if ((send_count % 250) == 0) {
                 send_stop_keep_alive(&route_table[i]);
             }
         }

@@ -15,7 +15,8 @@ enum class message_type : uint32_t {
     STOP_KEEP_ALIVE,
     BECOME_ROOT,
     GO_TO_SLEEP,
-    GET_NODES
+    GET_NODES,
+    GET_NODES_REPLY,
 };
 
 enum class my_bool : uint8_t {
@@ -48,6 +49,8 @@ inline constexpr const char * type_to_name(message_type type) {
             return "go_to_sleep";
         case message_type::GET_NODES:
             return "get_nodes";
+        case message_type::GET_NODES_REPLY:
+            return "get_nodes_reply";
     }
     return "invalid_type";
 }
@@ -79,16 +82,26 @@ struct go_to_sleep_data {
     uint64_t sleep_time_ms;
 };
 
+struct get_nodes_reply_data {
+    constexpr static std::size_t MAX_NODES = 15;
+
+    uint8_t num_nodes;
+    mesh_addr_t nodes[MAX_NODES];
+};
+
 struct message_t {
     message_type type;
-    uint16_t len;
+    uint16_t len = 0;
     union {
         keep_alive_data keep_alive;
         start_keep_alive_data start_keep_alive;
         stop_keep_alive_data stop_keep_alive;
         go_to_sleep_data go_to_sleep;
+        get_nodes_reply_data get_nodes_reply;
     };
 };
+
+constexpr static inline size_t header_size = sizeof(message_type) + sizeof(uint16_t);
 
 #pragma pack(pop)
 
