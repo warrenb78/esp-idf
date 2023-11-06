@@ -85,6 +85,8 @@ public:
         uint64_t last_keep_alive_timestamp_ms;
         uint64_t last_keep_alive_far_timestamp_ms;
         uint64_t count_of_commands;
+        uint8_t parent[6];
+        uint8_t layer;
         int64_t last_rssi;
     };
 
@@ -164,8 +166,13 @@ int send_message(const mesh_addr_t *to, message_t &message){
     }
     data.proto = MESH_PROTO_BIN;
     data.tos = MESH_TOS_P2P;
+    int flag = [&]() -> int {
+        if (to == nullptr)
+            return 0;
+        return MESH_DATA_P2P;
+    }();
 
-    int err = esp_mesh_send(to, &data, MESH_DATA_P2P, nullptr, 0);
+    int err = esp_mesh_send(to, &data, flag, nullptr, 0);
     if (err != ESP_OK) {
         if (to) {
             ESP_LOGE(COMMAND_TAG, "Got error %d when trying to send to " MACSTR, err, MAC2STR(to->addr));
@@ -183,14 +190,23 @@ int send_keep_alive(const mesh_addr_t *to)
     int err = esp_wifi_sta_get_rssi(&rssi);
     if (err)
         return err;
+
+    mesh_addr_t parent;
+    err = esp_mesh_get_parent_bssid(&parent);
+    if (err)
+        return err;
+
     message_t message = {
         .type = message_type::KEEP_ALIVE,
         .keep_alive = {
             .message_index = get_message_count(false),
             .timestamp = esp_timer_get_time() / 1000ull,
             .rssi = rssi, 
+            .parent_mac = {},
+            .layer = static_cast<uint8_t>(esp_mesh_get_layer()),
         },
     };
+    memcpy(message.keep_alive.parent_mac, parent.addr, sizeof(parent.addr));
     return send_message(to, message);
 }
 
@@ -223,9 +239,10 @@ int send_go_to_sleep(const mesh_addr_t *to, go_to_sleep_data go_to_sleep)
 
 void print_statistics() {
     const statistics &state = statistics::get_state();
-    ESP_LOGI(COMMAND_TAG, "mac   \t      count \t last rssi\t last time[ms]\t last far time[ms]");
+    ESP_LOGI(COMMAND_TAG, "mac\t\t    parent\t  layer \t count \t last rssi\t last time[ms]\t last far time[ms]");
     for (const auto &[addr, info] : state) {
-        ESP_LOGI(COMMAND_TAG, MACSTR "\t%08llu \t %08lld \t %08llu \t %08llu", MAC2STR(addr.addr),
+        ESP_LOGI(COMMAND_TAG, MACSTR " " MACSTR " %u %08llu \t %08lld \t %08llu \t %08llu",
+                 MAC2STR(addr.addr), MAC2STR(info.parent), info.layer,
                  info.count_of_commands, info.last_rssi, info.last_keep_alive_timestamp_ms,
                  info.last_keep_alive_far_timestamp_ms);
     }
@@ -238,17 +255,25 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
     // ESP_LOGI(COMMAND_TAG, "message %s from: " MACSTR, message_name, MAC2STR(from->addr));
     switch (message->type) {
         case message_type::KEEP_ALIVE: {
-            statistics &state = statistics::get_state();
-            statistics::metrics &metrics = state.get_node_info(*from);
-            ++metrics.count_of_commands;
-            metrics.last_keep_alive_timestamp_ms = esp_timer_get_time() / 1000ull;
-            metrics.last_keep_alive_far_timestamp_ms = message->keep_alive.timestamp;
-            metrics.last_rssi = message->keep_alive.rssi;
+            if (from) {
+                statistics &state = statistics::get_state();
+                statistics::metrics &metrics = state.get_node_info(*from);
+                ++metrics.count_of_commands;
 
-            ESP_LOGI(COMMAND_TAG, "message %s from:" MACSTR ", id %lu timestamp %llu ms, rssi %lld",
-                     message_name, MAC2STR(from->addr),
-                     message->keep_alive.message_index, message->keep_alive.timestamp,
-                     message->keep_alive.rssi);
+                const auto &keep_alive = message->keep_alive;
+                metrics.last_keep_alive_timestamp_ms = esp_timer_get_time() / 1000ull;
+                metrics.last_keep_alive_far_timestamp_ms = keep_alive.timestamp;
+                metrics.last_rssi = keep_alive.rssi;
+                metrics.layer = keep_alive.layer;
+                memcpy(metrics.parent, keep_alive.parent_mac, sizeof(metrics.parent));
+
+                ESP_LOGI(COMMAND_TAG,
+                        "message %s from:" MACSTR "[%u] parent: " MACSTR " , id %lu timestamp %llu ms, rssi %lld",
+                        message_name, MAC2STR(from->addr), keep_alive.layer, MAC2STR(keep_alive.parent_mac),
+                        keep_alive.message_index, keep_alive.timestamp, keep_alive.rssi);
+            } else {
+                ESP_LOGI(COMMAND_TAG, "keep alive without from");
+            }
             break;
         }
         case message_type::START_KEEP_ALIVE: 

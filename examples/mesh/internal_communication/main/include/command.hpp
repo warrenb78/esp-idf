@@ -51,6 +51,8 @@ struct keep_alive_data {
     uint32_t message_index;
     uint64_t timestamp;
     int64_t rssi;
+    uint8_t parent_mac[6];
+    uint8_t layer;
 };
 
 struct start_keep_alive_data {
