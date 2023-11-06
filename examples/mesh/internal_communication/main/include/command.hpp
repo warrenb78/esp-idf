@@ -59,12 +59,15 @@ struct keep_alive_data {
     int64_t rssi;
     uint8_t parent_mac[6];
     uint8_t layer;
+    uint16_t payload_size;
+    uint8_t payload[0];
 };
 
 struct start_keep_alive_data {
     my_bool reset_index;
     uint32_t delay_ms;
     my_bool send_to_root;
+    uint16_t payload_size;
     uint8_t target_mac[6];
 };
 
@@ -89,7 +92,7 @@ struct message_t {
 
 #pragma pack(pop)
 
-int send_keep_alive(const mesh_addr_t *to);
+int send_keep_alive(const mesh_addr_t *to, uint16_t extra_size);
 
 int send_start_keep_alive(const mesh_addr_t *to, start_keep_alive_data start_keep_alive);
 int send_stop_keep_alive(const mesh_addr_t *to);

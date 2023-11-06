@@ -36,7 +36,6 @@
  *******************************************************/
 static const char *MESH_TAG = "mesh_main";
 static const uint8_t MESH_ID[6] = { 0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
-static __attribute__((aligned(16))) uint8_t tx_buf[TX_SIZE] = { 0, };
 static __attribute__((aligned(16))) uint8_t rx_buf[RX_SIZE] = { 0, };
 static bool is_running = true;
 static bool is_mesh_connected = false;
@@ -98,8 +97,9 @@ void esp_mesh_p2p_tx_main(void *arg)
 
         start_keep_alive_data start_keep_alive{
             .reset_index = my_bool::TRUE,
-            .delay_ms = 100,
+            .delay_ms = 10,
             .send_to_root = my_bool::TRUE,
+            .payload_size = MESH_MTU_SIZE,
             .target_mac{},
         };
 

@@ -29,6 +29,10 @@ public:
         _delay_ms = start_data.delay_ms;
         _send_to_root = to_bool(start_data.send_to_root);
         memcpy(_target.addr, start_data.target_mac, sizeof(start_data.target_mac));
+        if (start_data.payload_size > sizeof(message_t))
+            _extra_size = start_data.payload_size - sizeof(message_t);
+        else
+            _extra_size = 0;
         if (to_bool(start_data.reset_index))
             get_message_count(true);
     }
@@ -36,14 +40,20 @@ public:
     void main_loop() {
         while (true) {
             if (_do_work) {
+                uint64_t start_time = esp_timer_get_time() / 1000ull;
                 const auto *target = [&]() -> const mesh_addr_t *{
                     if (_send_to_root) {
                         return nullptr;   
                     }
                     return &_target;
                 }();
-                send_keep_alive(target);
-                vTaskDelay(_delay_ms / portTICK_PERIOD_MS);
+                send_keep_alive(target, _extra_size);
+                uint64_t end_time = esp_timer_get_time() / 1000ull;
+                uint64_t fix_time = end_time - start_time;
+
+                // Account for send time
+                if (fix_time < _delay_ms)
+                    vTaskDelay(_delay_ms - fix_time / portTICK_PERIOD_MS);
                 continue;
             } else {
                 vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -55,6 +65,7 @@ private:
     uint32_t _delay_ms;
     bool _send_to_root;
     mesh_addr_t _target;
+    uint16_t _extra_size;
 };
 
 // Make mesh_addr_t hashable.
@@ -157,10 +168,10 @@ uint32_t get_message_count(bool reset)
     return res;
 }
 
-int send_message(const mesh_addr_t *to, message_t &message){
+int send_message(const mesh_addr_t *to, message_t &message, size_t size = sizeof(message_t)){
     mesh_data_t data;
     data.data = (uint8_t *)&message;
-    data.size = sizeof(message);
+    data.size = size;
     if (data.size > MESH_MTU_SIZE) {
         ESP_LOGE(TAG, "message to large %u limit %u", data.size, MESH_MTU_SIZE);
         return ESP_FAIL;
@@ -185,7 +196,9 @@ int send_message(const mesh_addr_t *to, message_t &message){
     return ESP_OK;
 }
 
-int send_keep_alive(const mesh_addr_t *to)
+static __attribute__((aligned(16))) uint8_t tx_buf[MESH_MTU_SIZE] = { 0, };
+
+int send_keep_alive(const mesh_addr_t *to, uint16_t extra_size)
 {
     int rssi = 0;
     int err = esp_wifi_sta_get_rssi(&rssi);
@@ -197,7 +210,8 @@ int send_keep_alive(const mesh_addr_t *to)
     if (err)
         return err;
 
-    message_t message = {
+    message_t &message = *reinterpret_cast<message_t *>(tx_buf);
+    message = {
         .type = message_type::KEEP_ALIVE,
         .keep_alive = {
             .message_index = get_message_count(false),
@@ -205,10 +219,12 @@ int send_keep_alive(const mesh_addr_t *to)
             .rssi = rssi, 
             .parent_mac = {},
             .layer = static_cast<uint8_t>(esp_mesh_get_layer()),
+            .payload_size = extra_size,
+            .payload = {}
         },
     };
     memcpy(message.keep_alive.parent_mac, parent.addr, sizeof(parent.addr));
-    return send_message(to, message);
+    return send_message(to, message, extra_size + sizeof(message_t));
 }
 
 int send_start_keep_alive(const mesh_addr_t *to, start_keep_alive_data start_keep_alive)
