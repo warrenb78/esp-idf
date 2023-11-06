@@ -11,19 +11,19 @@
 #include "command.hpp"
 #include "general.hpp"
 
-static const char *COMMAND_TAG = "command";
+static const char *TAG = "command";
 
 uint32_t get_message_count(bool reset);
 
 class keep_aliver {
 public:
     void stop() {
-        ESP_LOGE(COMMAND_TAG, "got stop keep alive");
+        ESP_LOGE(TAG, "got stop keep alive");
         _do_work = false;
     }
 
     void start(start_keep_alive_data start_data) {
-        ESP_LOGW(COMMAND_TAG, "got start keep alive");
+        ESP_LOGW(TAG, "got start keep alive");
         _do_work = true;
         _delay_ms = start_data.delay_ms;
         _send_to_root = to_bool(start_data.send_to_root);
@@ -161,7 +161,7 @@ int send_message(const mesh_addr_t *to, message_t &message){
     data.data = (uint8_t *)&message;
     data.size = sizeof(message);
     if (data.size > MESH_MTU_SIZE) {
-        ESP_LOGE(COMMAND_TAG, "message to large %u limit %u", data.size, MESH_MTU_SIZE);
+        ESP_LOGE(TAG, "message to large %u limit %u", data.size, MESH_MTU_SIZE);
         return ESP_FAIL;
     }
     data.proto = MESH_PROTO_BIN;
@@ -175,9 +175,9 @@ int send_message(const mesh_addr_t *to, message_t &message){
     int err = esp_mesh_send(to, &data, flag, nullptr, 0);
     if (err != ESP_OK) {
         if (to) {
-            ESP_LOGE(COMMAND_TAG, "Got error %d when trying to send to " MACSTR, err, MAC2STR(to->addr));
+            ESP_LOGE(TAG, "Got error %d when trying to send to " MACSTR, err, MAC2STR(to->addr));
         } else {
-            ESP_LOGE(COMMAND_TAG, "Got error %d when trying to send to root", err);
+            ESP_LOGE(TAG, "Got error %d when trying to send to root", err);
         }
         return err;
     }
@@ -239,9 +239,9 @@ int send_go_to_sleep(const mesh_addr_t *to, go_to_sleep_data go_to_sleep)
 
 void print_statistics() {
     const statistics &state = statistics::get_state();
-    ESP_LOGI(COMMAND_TAG, "mac\t\t    parent\t  layer \t count \t last rssi\t last time[ms]\t last far time[ms]");
+    ESP_LOGI(TAG, "mac\t\t    parent\t  layer \t count \t last rssi\t last time[ms]\t last far time[ms]");
     for (const auto &[addr, info] : state) {
-        ESP_LOGI(COMMAND_TAG, MACSTR " " MACSTR " %u %08llu \t %08lld \t %08llu \t %08llu",
+        ESP_LOGI(TAG, MACSTR " " MACSTR " %u %08llu \t %08lld \t %08llu \t %08llu",
                  MAC2STR(addr.addr), MAC2STR(info.parent), info.layer,
                  info.count_of_commands, info.last_rssi, info.last_keep_alive_timestamp_ms,
                  info.last_keep_alive_far_timestamp_ms);
@@ -252,7 +252,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 {
     const auto *message = reinterpret_cast<const message_t *>(buff);
     const char *message_name = type_to_name(message->type);
-    // ESP_LOGI(COMMAND_TAG, "message %s from: " MACSTR, message_name, MAC2STR(from->addr));
+    // ESP_LOGI(TAG, "message %s from: " MACSTR, message_name, MAC2STR(from->addr));
     switch (message->type) {
         case message_type::KEEP_ALIVE: {
             if (from) {
@@ -267,12 +267,12 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
                 metrics.layer = keep_alive.layer;
                 memcpy(metrics.parent, keep_alive.parent_mac, sizeof(metrics.parent));
 
-                ESP_LOGI(COMMAND_TAG,
+                ESP_LOGI(TAG,
                         "message %s from:" MACSTR "[%u] parent: " MACSTR " , id %lu timestamp %llu ms, rssi %lld",
                         message_name, MAC2STR(from->addr), keep_alive.layer, MAC2STR(keep_alive.parent_mac),
                         keep_alive.message_index, keep_alive.timestamp, keep_alive.rssi);
             } else {
-                ESP_LOGI(COMMAND_TAG, "keep alive without from");
+                ESP_LOGI(TAG, "keep alive without from");
             }
             break;
         }
@@ -283,16 +283,19 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             g_keep_alive.stop();
             break;
         case message_type::GO_TO_SLEEP: {
-            ESP_LOGW(COMMAND_TAG, "message %s from: " MACSTR " going to sleep for %llu ms",
+            ESP_LOGW(TAG, "message %s from: " MACSTR " going to sleep for %llu ms",
                      message_name, MAC2STR(from->addr), message->go_to_sleep.sleep_time_ms);
             g_keep_alive.stop();
             esp_mesh_stop();
             vTaskDelay(message->go_to_sleep.sleep_time_ms / portTICK_PERIOD_MS);
-            ESP_LOGW(COMMAND_TAG, "message %s from: " MACSTR " waking up",
+            ESP_LOGW(TAG, "message %s from: " MACSTR " waking up",
                      message_name, MAC2STR(from->addr));
             app_mesh_start();
             break;
         }
+        case message_type::BECOME_ROOT:
+            esp_mesh_set_type(MESH_ROOT);
+            break;
     }
     return ESP_OK;
 }

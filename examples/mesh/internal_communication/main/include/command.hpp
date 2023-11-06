@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include "esp_mesh.h"
 
 #define MESH_MTU_SIZE          (1460)
 
@@ -12,8 +13,8 @@ enum class message_type : uint32_t {
     KEEP_ALIVE = 0,
     START_KEEP_ALIVE,
     STOP_KEEP_ALIVE,
-    
-    GO_TO_SLEEP,
+    BECOME_ROOT,
+    GO_TO_SLEEP
 };
 
 enum class my_bool : uint8_t {
@@ -42,6 +43,8 @@ inline constexpr const char * type_to_name(message_type type) {
             return "stop_keep_alive";
         case message_type::GO_TO_SLEEP:
             return "go_to_sleep";
+        case message_type::BECOME_ROOT:
+            return "become_root";
     }
     return "invalid_type";
 }

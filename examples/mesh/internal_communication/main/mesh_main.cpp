@@ -18,6 +18,7 @@
 #include "mesh_light.h"
 #include "nvs_flash.h"
 #include "command.hpp"
+#include "uart_commander.hpp"
 
 
 /*******************************************************
@@ -382,8 +383,9 @@ void ip_event_handler(void *arg, esp_event_base_t event_base,
 
 void app_mesh_start()
 {
-/*  mesh initialization */
+    /* mesh initialization */
     ESP_ERROR_CHECK(esp_mesh_init());
+    ESP_ERROR_CHECK(esp_mesh_fix_root(true));
     ESP_ERROR_CHECK(esp_event_handler_register(MESH_EVENT, ESP_EVENT_ANY_ID, &mesh_event_handler, NULL));
     /*  set mesh topology */
     ESP_ERROR_CHECK(esp_mesh_set_topology(
@@ -450,6 +452,7 @@ void app_mesh_start()
 
 extern "C" void app_main(void)
 {
+    create_uart_task();
     ESP_ERROR_CHECK(mesh_light_init());
     ESP_ERROR_CHECK(nvs_flash_init());
     /*  tcpip initialization */
