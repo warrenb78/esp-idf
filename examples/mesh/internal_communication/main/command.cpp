@@ -10,6 +10,7 @@
 
 #include "command.hpp"
 #include "general.hpp"
+#include "uart_commander.hpp"
 
 static const char *TAG = "command";
 
@@ -248,6 +249,9 @@ void print_statistics() {
     }
 }
 
+mesh_addr_t nodes[15];
+int num;
+
 int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 {
     const auto *message = reinterpret_cast<const message_t *>(buff);
@@ -295,6 +299,11 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
         }
         case message_type::BECOME_ROOT:
             esp_mesh_set_type(MESH_ROOT);
+            break;
+        case message_type::GET_NODES:
+            ESP_ERROR_CHECK(esp_mesh_get_routing_table(nodes, sizeof(nodes), &num));
+            send_uart_bytes((uint8_t *)&num, sizeof(int));
+            send_uart_bytes((uint8_t *)nodes, num*sizeof(mesh_addr_t));
             break;
     }
     return ESP_OK;

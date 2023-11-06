@@ -14,7 +14,8 @@ enum class message_type : uint32_t {
     START_KEEP_ALIVE,
     STOP_KEEP_ALIVE,
     BECOME_ROOT,
-    GO_TO_SLEEP
+    GO_TO_SLEEP,
+    GET_NODES
 };
 
 enum class my_bool : uint8_t {
@@ -41,10 +42,12 @@ inline constexpr const char * type_to_name(message_type type) {
             return "start_keep_alive";
         case message_type::STOP_KEEP_ALIVE:
             return "stop_keep_alive";
-        case message_type::GO_TO_SLEEP:
-            return "go_to_sleep";
         case message_type::BECOME_ROOT:
             return "become_root";
+        case message_type::GO_TO_SLEEP:
+            return "go_to_sleep";
+        case message_type::GET_NODES:
+            return "get_nodes";
     }
     return "invalid_type";
 }
@@ -75,6 +78,7 @@ struct go_to_sleep_data {
 
 struct message_t {
     message_type type;
+    uint16_t len;
     union {
         keep_alive_data keep_alive;
         start_keep_alive_data start_keep_alive;

@@ -78,6 +78,11 @@ static void uart_task(void *arg)
     }
 }
 
+int send_uart_bytes(const uint8_t *buf, size_t size)
+{
+    return uart_write_bytes(UART_PORT_NUM, buf, size);
+}
+
 void create_uart_task(void)
 {
     xTaskCreate(uart_task, "uart_echo_task", 2048, NULL, 10, NULL);
