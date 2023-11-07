@@ -14,9 +14,17 @@
 
 static const char *TAG = "command";
 
+const start_keep_alive_data BASIC_KEEP_ALIVE {
+    .reset_index = my_bool::TRUE,
+    .delay_ms = 500, // 2 Hz,
+    .send_to_root = my_bool::TRUE,
+    .payload_size = 0,
+    .target_mac{},
+};
+
 uint32_t get_message_count(bool reset);
 
-    class keep_aliver {
+class keep_aliver {
 public:
     void stop() {
         ESP_LOGE(TAG, "got stop keep alive");
@@ -108,6 +116,10 @@ public:
 
     void clear(mesh_addr_t addr) {
         _info.erase(addr);
+    }
+
+    void clear() {
+        _info.clear();
     }
 
     // Will set the addr if not existing.
@@ -212,6 +224,7 @@ keep_aliver g_keep_alive;
 void keep_alive_task(void *arg) {
     (void)arg;
     g_keep_alive.main_loop();
+    g_keep_alive.start(BASIC_KEEP_ALIVE);
 }
 
 uint32_t get_message_count(bool reset)
@@ -405,6 +418,7 @@ void handle_get_statistics()
         .statistics_tree_info{},
     };
     auto &tree_info = reply.statistics_tree_info;
+    tree_info.current_ms = esp_timer_get_time() / 1000ull;
     statistics &state = statistics::get_state();
     {
         auto guard = state.lock();
@@ -447,6 +461,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             break;
         case message_type::STOP_KEEP_ALIVE:
             g_keep_alive.stop();
+            g_keep_alive.start(BASIC_KEEP_ALIVE);
             break;
         case message_type::GO_TO_SLEEP: {
             ESP_LOGW(TAG, "message %s from: " MACSTR " going to sleep for %llu ms",
@@ -457,6 +472,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             ESP_LOGW(TAG, "message %s from: " MACSTR " waking up",
                      message_name, MAC2STR(from->addr));
             app_mesh_start();
+            g_keep_alive.start(BASIC_KEEP_ALIVE);
             break;
         }
         case message_type::BECOME_ROOT:
@@ -465,8 +481,13 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
         case message_type::GET_NODES:
             handle_get_nodes();
             break;
-        case message_type::GET_STATISTICS: {
+        case message_type::GET_STATISTICS:
             handle_get_statistics();
+            break;
+        case message_type::CLEAR_STATISTICS: {
+            statistics &state = statistics::get_state();
+            auto guard = state.lock();
+            state.clear();
             break;
         }
         case message_type::GET_NODES_REPLY:

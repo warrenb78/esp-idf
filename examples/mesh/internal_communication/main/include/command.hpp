@@ -19,6 +19,7 @@ enum class message_type : uint32_t {
     GET_NODES_REPLY,
     GET_STATISTICS,
     GET_STATISTICS_REPLY,
+    CLEAR_STATISTICS,
     FORWARD
 };
 
@@ -58,6 +59,8 @@ inline constexpr const char * type_to_name(message_type type) {
             return "get_statistics";
         case message_type::GET_STATISTICS_REPLY:
             return "get_statistics_reply";
+        case message_type::CLEAR_STATISTICS:
+            return "clear_statistics";
         case message_type::FORWARD:
             return "forward";
     }
@@ -114,6 +117,7 @@ struct statistics_tree_info_data {
     constexpr static std::size_t MAX_NODES = 15;
 
     uint8_t num_nodes;
+    uint64_t current_ms;
     statistics_node_info nodes[MAX_NODES];
 };
 

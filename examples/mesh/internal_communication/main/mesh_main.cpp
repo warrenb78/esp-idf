@@ -103,7 +103,7 @@ void esp_mesh_p2p_tx_main(void *arg)
             .target_mac{},
         };
 
-        if ((send_count % 250) == 0) {
+        if ((send_count % 600) == 0) {
             print_statistics();
         }
 

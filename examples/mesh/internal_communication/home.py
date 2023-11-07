@@ -4,10 +4,9 @@ from construct import *
 import serial
 import itertools
 
-def get_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('port', )
-    return parser
+import log
+
+NOT_ALIVE_TIME_MS = 1000
 
 MessageType = Enum(Int32ul, 
         KEEP_ALIVE = 0,
@@ -19,7 +18,8 @@ MessageType = Enum(Int32ul,
         GET_NODES_REPLY = 6,
         GET_STATISTICS = 7,
         GET_STATISTICS_REPLY = 8,
-        FORWARD = 9
+        CLEAR_STATISTICS = 9,
+        FORWARD = 10
 )
 
 MessageHeader = Struct(
@@ -56,22 +56,11 @@ StatisticsNodeInfo = Struct(
 
 StatisticsTreeInfo = Struct(
     "num_nodes" / Int8ul,
+    "current_ms" / Int64ul,
     "nodes" / Array(MAX_NODES, StatisticsNodeInfo)
 )
 
-class tree_represent_node(object):
-    def __init__(self, value, children = []):
-        self.value = value
-        self.children = children
-
-    def __str__(self, level=0):
-        ret = "\t"*level+repr(self.value)+"\n"
-        for child in self.children:
-            ret += child.__str__(level+1)
-        return ret
-
-    def __repr__(self):
-        return '<tree node representation>'
+_LOGGER = log.logging.getLogger(__name__)
 
 
 class Commander:
@@ -101,63 +90,92 @@ class Commander:
     def print_macs(self):
         for dev_id, mac in self.id_to_mac.items():
             mac = Mac.parse(mac)
-            print(f"{dev_id:2} - {self._format_mac(mac)}")
-
-    def _send_command(self, cmd, buf=b''):
-        b = self.format.build(dict(header = dict(cmd=cmd, len=len(buf)), buf=buf))
-        print(b)
-        self.s.write(b)
+            _LOGGER.info(f"{dev_id:2} - {self._format_mac(mac)}")
 
     def send_become_root(self):
         self._send_command(MessageType.BECOME_ROOT)
 
+    def clear_statistics(self):
+        self._send_command(MessageType.CLEAR_STATISTICS)
+
+    def start_100kbps_transmission(self, dst):
+        return self.start_transmission(dst, 10, 1000)
+
+    def start_max_trasmition(self, dst):
+        # Max parameters for send
+        return self.start_transmission(dst, 1, 1460)
+
+    def start_transmission(self, dst, delay_ms, payload_size):
+        return self._send_start_keep_alive(dst, 0, delay_ms, payload_size)
+
+    def stop_transmission(self, dst):
+        return self._send_stop_keep_alive(dst)
+
+    def bring_node_down(self, dst, ms):
+        return self._send_go_to_sleep(dst, ms)
+
+    def get_nodes(self):
+        return self._send_get_nodes()
+
+    def transmission_info(self):
+        return self._send_get_statistics()
+
+    def _build_command(self, cmd, buf=b''):
+        return self.format.build(dict(header = dict(cmd=cmd, len=len(buf)), buf=buf))
+
+    def _send_command(self, cmd, buf=b''):
+        b = self._build_command(cmd, buf)
+        _LOGGER.debug(f'Sending cmd {cmd}: data {b}')
+        self.s.write(b)
+
     def _recv_message(self):
-        arr = self.s.read(MessageHeader.sizeof())
-        header = MessageHeader.parse(arr)
+        header_arr = self.s.read(MessageHeader.sizeof())
+        header = MessageHeader.parse(header_arr)
         arr = self.s.read(header.len)
-        print(f"got {MessageHeader.sizeof()} bytes to read {header.len}")
+        _LOGGER.debug(f'Receive cmd {header.cmd}: bytes len {header.len} data {header_arr + arr}')
         return arr
 
-    def send_forward(self, dst, buf):
+    def _send_forward(self, dst, buf):
         forward = Struct(
             "mac" / Mac,
             "buf" / Array(len(buf), Byte)
         ).build(dict(mac=self.id_to_mac[dst], buf = buf))
 
-        b = self.format.build(dict(cmd=MessageType.FORWARD, len=len(forward), buf=forward))
-        print(b)
-        self.s.write(b)
+        self._send_command(MessageType.FORWARD, forward)
 
-    def send_start_keep_alive(self, dst, reset_index, delay_ms, send_to_root, target_mac):
+    def _send_start_keep_alive(self, dst, reset_index, delay_ms, payload_size, send_to_root=True, target_mac=(0,0,0,0,0,0)):
         start_keep_alive = Struct(
             "reset_index" / Byte,
             "delay_ms" / Int32ul,
             "send_to_root" / Byte,
+            "payload_size" / Int16ul,
             "target_mac" / Array(6, Byte)
-        ).build(dict(reset_index = reset_index, delay_ms = delay_ms, send_to_root = send_to_root, target_mac=target_mac))
+        ).build(dict(reset_index = reset_index, delay_ms = delay_ms,
+                     send_to_root = send_to_root, target_mac=target_mac,
+                     payload_size = payload_size))
 
-        b = self.format.build(dict(cmd=MessageType.START_KEEP_ALIVE, len=len(start_keep_alive), buf=start_keep_alive))
+        b = self._build_command(MessageType.START_KEEP_ALIVE, start_keep_alive)
 
-        self.send_forward(dst, b)
+        self._send_forward(dst, b)
         
-    def send_stop_keep_alive(self, dst):
-        b = self.format.build(dict(cmd=MessageType.STOP_KEEP_ALIVE, len=0, buf=b""))
-        self.send_forward(dst, b)
+    def _send_stop_keep_alive(self, dst):
+        b = self.format.build(dict(header = dict(cmd=MessageType.STOP_KEEP_ALIVE, len=0), buf=b""))
+        self._send_forward(dst, b)
 
-    def send_go_to_sleep(self, dst, ms):
+    def _send_go_to_sleep(self, dst, ms):
         go_to_sleep = Struct(
             "ms" / Int64ul
         ).build(dict(ms=ms))
 
-        b = self.format.build(dict(cmd=MessageType.GO_TO_SLEEP, len=len(go_to_sleep), buf=go_to_sleep))
+        b = self._build_command(MessageType.GO_TO_SLEEP, go_to_sleep)
 
-        self.send_forward(dst, b)
+        self._send_forward(dst, b)
 
-    def send_get_nodes(self):
+    def _send_get_nodes(self):
         self._send_command(MessageType.GET_NODES)
         arr = self._recv_message()
         res = GetNodesReply.parse(arr)
-        print(f"number of nodes {res.num_nodes}")
+        _LOGGER.info(f"Got {res.num_nodes} nodes")
         for i, mac in enumerate(res.nodes):
             if i >= res.num_nodes:
                 break
@@ -165,14 +183,14 @@ class Commander:
             if mac not in self.mac_to_id.keys():
                 self.mac_to_id[mac] = self.count
                 self.id_to_mac[self.count] = mac
-                print(self.count, mac)
+                _LOGGER.info(f'New node id {self.count} mac {self._format_mac(mac)}')
                 self.count += 1
 
-    def send_get_statistics(self):
+    def _send_get_statistics(self):
         self._send_command(MessageType.GET_STATISTICS)
         arr = self._recv_message()
         res = StatisticsTreeInfo.parse(arr)
-        print(f"number of nodes {res.num_nodes}")
+        _LOGGER.info(f"Sees {res.num_nodes} nodes from root")
         if res.num_nodes == 0:
             return
         tree = dict()
@@ -187,11 +205,10 @@ class Commander:
         root_set = list(set(tree.keys()) - set(nodes.keys()))
         assert len(root_set) == 1
 
-        print(f"root mac {Mac.build(root_set[0])}")
-        print('\n' + self._format_sub_tree(root_set[0], tree, nodes))
+        _LOGGER.info('Tree:\n' + self._format_sub_tree(root_set[0], tree, nodes, res.current_ms))
         
     @staticmethod
-    def _format_info_for_tree(mac, info_dict) -> str:
+    def _format_info_for_tree(mac, info_dict, current_ms) -> str:
         val = info_dict.get(mac, None)
         if val is None:
             return ''
@@ -201,17 +218,29 @@ class Commander:
         else:
             time_s = (val.last_keep_alive_ms - val.first_message_ms) / 1000.
             kbps_val = val.total_bytes_sent / 1000. / time_s;
-            kbps = f' KB/s[{kbps_val:4.3f}]'
-            msg_p_s = f' Pkt/s[{val.count_of_messages/time_s:3.2f}]'
+            kbps = f' - KB/s[{kbps_val:4.3f}]'
+            msg_p_s = f' - Pkt/s[{val.count_of_messages/time_s:3.2f}]'
 
-        return f' : rssi[{val.last_rssi:03}]{kbps}{msg_p_s}'
+        since_last = current_ms - val.last_keep_alive_ms
+        alive = since_last < NOT_ALIVE_TIME_MS
+        alive_s = 'Up  ' if alive else 'Down'
 
-    def _format_sub_tree(self, current_id, tree, info, level=0) -> str:
+        return f' : {alive_s} - Since last pkt ms[{since_last:4}] - rssi[{val.last_rssi:03}]{kbps}{msg_p_s}'
+
+    def _format_sub_tree(self, current_id, tree, info, current_ms, level=0) -> str:
         id_str = self._format_mac(current_id)
-        node_info = self._format_info_for_tree(current_id, info)
+        node_info = self._format_info_for_tree(current_id, info, current_ms)
         prefix = '----' * level + (' ' if level else '')
         res = f'{prefix}{id_str}{node_info}\n'
         for child in tree[current_id]:
-            res += self._format_sub_tree(child, tree, info, level + 1)
+            res += self._format_sub_tree(child, tree, info, current_ms, level + 1)
         return res
         
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-l', '--log-path', help='Path to text loger', default='mesh.log')
+    return parser
+
+if __name__ == '__main__':
+    args = build_parser().parse_args()
+    log.config_logging(args.log_path)
