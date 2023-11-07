@@ -169,8 +169,10 @@ struct message_t {
     };
 };
 
-constexpr static inline size_t header_size = sizeof(message_type) + sizeof(uint16_t);
-constexpr static inline size_t fwd_size = 7;
+constexpr inline size_t header_size = sizeof(message_type) + sizeof(uint16_t);
+constexpr inline size_t keep_alive_size = header_size + sizeof(keep_alive_data);
+// MAC + to_host
+constexpr inline size_t fwd_size = 7;
 
 #pragma pack(pop)
 

@@ -39,8 +39,8 @@ public:
                  _delay_ms, _delay_ticks);
         _send_to_root = to_bool(start_data.send_to_root);
         memcpy(_target.addr, start_data.target_mac, sizeof(start_data.target_mac));
-        if (start_data.payload_size > sizeof(message_t))
-            _extra_size = start_data.payload_size - sizeof(message_t);
+        if (start_data.payload_size > keep_alive_size)
+            _extra_size = start_data.payload_size - keep_alive_size;
         else
             _extra_size = 0;
         if (to_bool(start_data.reset_index))
@@ -299,7 +299,7 @@ int send_keep_alive(const mesh_addr_t *to, uint16_t extra_size)
         },
     };
     memcpy(message.keep_alive.parent_mac, parent.addr, sizeof(parent.addr));
-    return send_message(to, message, extra_size + sizeof(message_t));
+    return send_message(to, message, extra_size + keep_alive_size);
 }
 
 int send_start_keep_alive(const mesh_addr_t *to, start_keep_alive_data start_keep_alive)

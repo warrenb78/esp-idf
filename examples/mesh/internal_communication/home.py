@@ -6,7 +6,7 @@ import itertools
 
 import log
 
-NOT_ALIVE_TIME_MS = 1000
+NOT_ALIVE_TIME_MS = 2000
 
 MessageType = Enum(Int32ul, 
         KEEP_ALIVE = 0,
@@ -224,6 +224,8 @@ class Commander:
         tree = dict()
         nodes = dict()
         for node_info in itertools.islice(res.nodes, res.num_nodes):
+            # Add 1 to the last number for sta vs ap mac
+            node_info.mac[5] = node_info.mac[5] + 1
             # add to parent
             tree.setdefault(tuple(node_info.parent_mac), []).append(tuple(node_info.mac))
             # init empty for leafs
@@ -231,7 +233,8 @@ class Commander:
             nodes[tuple(node_info.mac)] = node_info
 
         root_set = list(set(tree.keys()) - set(nodes.keys()))
-        assert len(root_set) == 1
+        if len(root_set) != 1:
+            print(root_set)
 
         _LOGGER.info('Tree:\n' + self._format_sub_tree(root_set[0], tree, nodes, res.current_ms))
         
