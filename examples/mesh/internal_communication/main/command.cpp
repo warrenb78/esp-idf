@@ -16,7 +16,7 @@ static const char *TAG = "command";
 
 uint32_t get_message_count(bool reset);
 
-class keep_aliver {
+    class keep_aliver {
 public:
     void stop() {
         ESP_LOGE(TAG, "got stop keep alive");
@@ -24,9 +24,11 @@ public:
     }
 
     void start(start_keep_alive_data start_data) {
-        ESP_LOGW(TAG, "got start keep alive");
         _do_work = true;
         _delay_ms = start_data.delay_ms;
+        _delay_ticks = _delay_ms / portTICK_PERIOD_MS;
+        ESP_LOGW(TAG, "Got start keep alive delay ms %lu, delay ticks %lu",
+                 _delay_ms, _delay_ticks);
         _send_to_root = to_bool(start_data.send_to_root);
         memcpy(_target.addr, start_data.target_mac, sizeof(start_data.target_mac));
         if (start_data.payload_size > sizeof(message_t))
@@ -35,12 +37,12 @@ public:
             _extra_size = 0;
         if (to_bool(start_data.reset_index))
             get_message_count(true);
+        _last_wake_time = xTaskGetTickCount();
     }
 
     void main_loop() {
         while (true) {
             if (_do_work) {
-                uint64_t start_time = esp_timer_get_time() / 1000ull;
                 const auto *target = [&]() -> const mesh_addr_t *{
                     if (_send_to_root) {
                         return nullptr;   
@@ -48,21 +50,19 @@ public:
                     return &_target;
                 }();
                 send_keep_alive(target, _extra_size);
-                uint64_t end_time = esp_timer_get_time() / 1000ull;
-                uint64_t fix_time = end_time - start_time;
-
-                // Account for send time
-                if (fix_time < _delay_ms)
-                    vTaskDelay(_delay_ms - fix_time / portTICK_PERIOD_MS);
+                if (_delay_ticks > 0)
+                    xTaskDelayUntil(&_last_wake_time, _delay_ticks);
                 continue;
             } else {
-                vTaskDelay(100 / portTICK_PERIOD_MS);
+                vTaskDelay(10 / portTICK_PERIOD_MS);
             }
         }
     }
 private:
+    TickType_t _last_wake_time;
     std::atomic<bool> _do_work = false;
     uint32_t _delay_ms;
+    TickType_t _delay_ticks;
     bool _send_to_root;
     mesh_addr_t _target;
     uint16_t _extra_size;
@@ -340,7 +340,6 @@ void print_statistics() {
 
 void handle_keep_alive(const mesh_addr_t *from, const message_t *message, size_t size)
 {
-    const char *message_name = "keep_alive";
     statistics &state = statistics::get_state();
     auto guard = state.lock();
     statistics::metrics &metrics = state.get_node_info(*from);
@@ -366,10 +365,13 @@ void handle_keep_alive(const mesh_addr_t *from, const message_t *message, size_t
     }
     metrics.last_message_id = keep_alive.message_index;
 
+#if 0
+    const char *message_name = "keep_alive";
     ESP_LOGI(TAG,
             "message %s from:" MACSTR "[%u] parent: " MACSTR " , id %lu timestamp %llu ms, rssi %lld",
             message_name, MAC2STR(from->addr), keep_alive.layer, MAC2STR(keep_alive.parent_mac),
             keep_alive.message_index, keep_alive.timestamp, keep_alive.rssi);
+#endif
 }
 
 void handle_get_nodes()
@@ -383,7 +385,7 @@ void handle_get_nodes()
     auto &get_nodes_reply = nodes_reply.get_nodes_reply;
     int num_nodes = 0;
     int err = esp_mesh_get_routing_table(
-        get_nodes_reply.nodes, std::size(get_nodes_reply.nodes), &num_nodes);
+        get_nodes_reply.nodes, sizeof(get_nodes_reply.nodes), &num_nodes);
     if (err) {
         ESP_LOGE(TAG, "Failed get routing table %d", err);
         get_nodes_reply.num_nodes = 0;
@@ -405,9 +407,7 @@ void handle_get_statistics()
     auto &tree_info = reply.statistics_tree_info;
     statistics &state = statistics::get_state();
     {
-        ESP_LOGI(TAG, "got into get statistics");
         auto guard = state.lock();
-        ESP_LOGI(TAG, "got lock statistics");
         uint32_t i = 0;
         for (const auto &[mac, src_info] : state) {
             auto &node_info = tree_info.nodes[i];
@@ -425,7 +425,6 @@ void handle_get_statistics()
         }
         tree_info.num_nodes = i;
     }
-    ESP_LOGI(TAG, "finished loop");
     send_uart_bytes((uint8_t *)&reply, sizeof(tree_info) + header_size);
 }
 

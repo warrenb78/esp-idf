@@ -97,7 +97,7 @@ void esp_mesh_p2p_tx_main(void *arg)
 
         start_keep_alive_data start_keep_alive{
             .reset_index = my_bool::TRUE,
-            .delay_ms = 10,
+            .delay_ms = 1,
             .send_to_root = my_bool::TRUE,
             .payload_size = MESH_MTU_SIZE,
             .target_mac{},
@@ -112,10 +112,12 @@ void esp_mesh_p2p_tx_main(void *arg)
             if (0 == memcmp(&route_table[i], mac_base, sizeof(mac_base)))
                 continue;
     
+#ifdef PREIODIC_SLEEP
             if ((send_count % 1000) == 0) {
                 send_go_to_sleep(&route_table[i], {.sleep_time_ms = 10000});
                 continue;
             } 
+#endif
             
             if ((send_count % 500) == 0) {
                 send_start_keep_alive(&route_table[i], start_keep_alive);
