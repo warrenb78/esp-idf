@@ -20,7 +20,11 @@ enum class message_type : uint32_t {
     GET_STATISTICS,
     GET_STATISTICS_REPLY,
     CLEAR_STATISTICS,
-    FORWARD
+    FORWARD,
+    ECHO_REQUEST,
+    ECHO_REPLY,
+    GET_LATENCY,
+    GET_LATENCY_REPLY,
 };
 
 enum class my_bool : uint8_t {
@@ -63,6 +67,14 @@ inline constexpr const char * type_to_name(message_type type) {
             return "clear_statistics";
         case message_type::FORWARD:
             return "forward";
+        case message_type::ECHO_REQUEST:
+            return "echo_request";
+        case message_type::ECHO_REPLY:
+            return "echo_reply";
+        case message_type::GET_LATENCY:
+            return "get_latency";
+        case message_type::GET_LATENCY_REPLY:
+            return "get_latency_reply";
     }
     return "invalid_type";
 }
@@ -123,7 +135,21 @@ struct statistics_tree_info_data {
 
 struct forward_data {
     uint8_t mac[6];
+    uint8_t to_host;
     uint8_t payload[0];
+};
+
+struct echo_data_t {
+    uint64_t timestamp;
+};
+
+struct get_latency_data {
+    uint8_t dst[6];
+};
+
+struct get_latency_reply_data {
+    uint64_t start_ms;
+    uint64_t end_ms;
 };
 
 struct message_t {
@@ -137,10 +163,14 @@ struct message_t {
         get_nodes_reply_data get_nodes_reply;
         statistics_tree_info_data statistics_tree_info;
         forward_data forward;
+        echo_data_t echo_data; 
+        get_latency_data get_latency;
+        get_latency_reply_data get_latency_reply;
     };
 };
 
 constexpr static inline size_t header_size = sizeof(message_type) + sizeof(uint16_t);
+constexpr static inline size_t fwd_size = 7;
 
 #pragma pack(pop)
 

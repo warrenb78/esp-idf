@@ -223,8 +223,8 @@ keep_aliver g_keep_alive;
 
 void keep_alive_task(void *arg) {
     (void)arg;
-    g_keep_alive.main_loop();
     g_keep_alive.start(BASIC_KEEP_ALIVE);
+    g_keep_alive.main_loop();
 }
 
 uint32_t get_message_count(bool reset)
@@ -476,6 +476,8 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             break;
         }
         case message_type::BECOME_ROOT:
+            g_keep_alive.stop();
+            vTaskDelay(10 / portTICK_PERIOD_MS);
             esp_mesh_set_type(MESH_ROOT);
             break;
         case message_type::GET_NODES:
@@ -492,14 +494,69 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
         }
         case message_type::GET_NODES_REPLY:
         case message_type::GET_STATISTICS_REPLY:
+        case message_type::GET_LATENCY_REPLY:
             ESP_LOGW(TAG, "got non relevant message %s", message_name);
             break;
         case message_type::FORWARD: {
-            mesh_addr_t dest;
-            memcpy(&dest, message->forward.mac, sizeof(dest));
-            ESP_LOGI(TAG, "Forwarding to %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", 
-                dest.addr[0], dest.addr[1], dest.addr[2], dest.addr[3], dest.addr[4], dest.addr[5]);
-            send_message(&dest, *(message_t*)&message->forward.payload);
+            if (message->forward.to_host) {
+                // TODO: 7 is mac + to_host.
+                ESP_LOGI(TAG, "Forwarding to host bytes %u", message->len - fwd_size);
+                send_uart_bytes(message->forward.payload, message->len - fwd_size);
+            } else {
+                mesh_addr_t dest;
+                memcpy(&dest, message->forward.mac, sizeof(dest));
+                ESP_LOGI(TAG, "Forwarding to %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", 
+                    dest.addr[0], dest.addr[1], dest.addr[2], dest.addr[3], dest.addr[4], dest.addr[5]);
+                send_message(&dest, *(message_t*)&message->forward.payload, message->len - fwd_size);
+            }
+            break;
+        }
+        case message_type::ECHO_REQUEST: {
+            ESP_LOGI(TAG, "Got echo requets %llu", message->echo_data.timestamp);
+            message_t &msg = *reinterpret_cast<message_t *>(tx_buf);
+            memcpy(&msg, message, size);
+            msg.type = message_type::ECHO_REPLY;
+            send_message(from, msg);
+            break;
+        }
+        case message_type::ECHO_REPLY: {
+            message_t &reply = *reinterpret_cast<message_t *>(tx_buf);
+            reply = {
+               .type = message_type::FORWARD,
+               .forward = {
+                   .mac{},
+                   .to_host = 1,
+                   .payload{},
+               }
+            };
+            message_t &inner = *reinterpret_cast<message_t *>(reply.forward.payload);
+            inner = {
+                .type = message_type::GET_LATENCY_REPLY,
+                .len = sizeof(get_latency_reply_data),
+                .get_latency_reply = {
+                    .start_ms = message->echo_data.timestamp,
+                    .end_ms = esp_timer_get_time() / 1000ull,
+                },
+            };
+            ESP_LOGI(TAG, "got echo reply %llu --> %llu",
+                     inner.get_latency_reply.start_ms,
+                     inner.get_latency_reply.end_ms);
+            send_message(nullptr, reply, header_size * 2 + sizeof(forward_data) + sizeof(get_latency_reply_data));
+            break;
+        }
+        case message_type::GET_LATENCY: {
+            message_t &msg = *reinterpret_cast<message_t *>(tx_buf);
+            msg = {
+                .type = message_type::ECHO_REQUEST,
+                .len = sizeof(echo_data_t),
+                .echo_data = {
+                    .timestamp = esp_timer_get_time() / 1000ull,
+                },
+            };
+            ESP_LOGI(TAG, "send get echo to " MACSTR, MAC2STR(message->get_latency.dst));
+            mesh_addr_t target{};
+            memcpy(target.addr, message->get_latency.dst, sizeof(target.addr));
+            send_message(&target, msg);
             break;
         }
     }

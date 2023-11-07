@@ -19,7 +19,11 @@ MessageType = Enum(Int32ul,
         GET_STATISTICS = 7,
         GET_STATISTICS_REPLY = 8,
         CLEAR_STATISTICS = 9,
-        FORWARD = 10
+        FORWARD = 10,
+        ECHO_REQUEST = 11,
+        ECHO_REPLY = 12,
+        GET_LATENCY = 13,
+        GET_LATENCY_REPLY = 14,
 )
 
 MessageHeader = Struct(
@@ -58,6 +62,11 @@ StatisticsTreeInfo = Struct(
     "num_nodes" / Int8ul,
     "current_ms" / Int64ul,
     "nodes" / Array(MAX_NODES, StatisticsNodeInfo)
+)
+
+GetLatencyReplyData = Struct(
+    "start_ms" / Int64ul,
+    "end_ms" / Int64ul,
 )
 
 _LOGGER = log.logging.getLogger(__name__)
@@ -120,6 +129,9 @@ class Commander:
     def transmission_info(self):
         return self._send_get_statistics()
 
+    def get_latency(self, from_node, to_node):
+        return self._send_get_latency(from_node, to_node)
+
     def _build_command(self, cmd, buf=b''):
         return self.format.build(dict(header = dict(cmd=cmd, len=len(buf)), buf=buf))
 
@@ -131,6 +143,7 @@ class Commander:
     def _recv_message(self):
         header_arr = self.s.read(MessageHeader.sizeof())
         header = MessageHeader.parse(header_arr)
+        _LOGGER.debug(f'len {header.len}')
         arr = self.s.read(header.len)
         _LOGGER.debug(f'Receive cmd {header.cmd}: bytes len {header.len} data {header_arr + arr}')
         return arr
@@ -138,8 +151,9 @@ class Commander:
     def _send_forward(self, dst, buf):
         forward = Struct(
             "mac" / Mac,
+            "to_host" / Int8ul,
             "buf" / Array(len(buf), Byte)
-        ).build(dict(mac=self.id_to_mac[dst], buf = buf))
+        ).build(dict(mac=self.id_to_mac[dst], buf = buf, to_host = 0))
 
         self._send_command(MessageType.FORWARD, forward)
 
@@ -161,6 +175,20 @@ class Commander:
     def _send_stop_keep_alive(self, dst):
         b = self.format.build(dict(header = dict(cmd=MessageType.STOP_KEEP_ALIVE, len=0), buf=b""))
         self._send_forward(dst, b)
+
+    def _send_get_latency(self, src_echo, dst_echo):
+        get_latency = Struct(
+            "dst" / Mac
+        ).build(dict(dst = self.id_to_mac[dst_echo]))
+        b = self._build_command(MessageType.GET_LATENCY, get_latency)
+        self._send_forward(src_echo, b)
+        arr = self._recv_message()
+        res = GetLatencyReplyData.parse(arr)
+        _LOGGER.debug("Latency %d -> %d -> %d start [%d ms] end [%d ms] round trip [%d ms]", 
+                      src_echo, dst_echo, src_echo, res.start_ms,
+                      res.end_ms, res.end_ms - res.start_ms)
+        _LOGGER.info("Latency %d -> %d -> %d round trip [%d ms]", 
+                     src_echo, dst_echo, src_echo, res.end_ms - res.start_ms)
 
     def _send_go_to_sleep(self, dst, ms):
         go_to_sleep = Struct(
