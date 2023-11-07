@@ -18,11 +18,14 @@ MessageType = Enum(Int32ul,
         GET_NODES = 5,
         GET_NODES_REPLY = 6,
         GET_STATISTICS = 7,
-        GET_STATISTICS_REPLY = 8,)
+        GET_STATISTICS_REPLY = 8,
+        FORWARD = 9
+)
 
 MessageHeader = Struct(
     "cmd" / MessageType,
-    "len" / Int16ul)
+    "len" / Int16ul
+)
 
 Message = Struct(
     "header" / MessageHeader,
@@ -72,8 +75,8 @@ class tree_represent_node(object):
 
 
 class Commander:
-    def __init__(self, shit, baudrate):
-        self.s = serial.Serial(port=shit, baudrate=baudrate)
+    def __init__(self, port, baudrate):
+        self.s = serial.Serial(port=port, baudrate=baudrate)
         self.format = Message
         self.id_to_mac = {}
         self.mac_to_id = {}
@@ -100,16 +103,13 @@ class Commander:
             mac = Mac.parse(mac)
             print(f"{dev_id:2} - {self._format_mac(mac)}")
 
-    def _send_empty_command(self, cmd):
-        b = self.format.build(dict(header = dict(cmd=cmd, len=0), buf=b""))
+    def _send_command(self, cmd, buf=b''):
+        b = self.format.build(dict(header = dict(cmd=cmd, len=len(buf)), buf=buf))
         print(b)
         self.s.write(b)
 
     def send_become_root(self):
-        self._send_empty_command(MessageType.BECOME_ROOT)
-
-    def send_start_keep_alive(self):
-        self._send_empty_command(MessageType.START_KEEP_ALIVE)
+        self._send_command(MessageType.BECOME_ROOT)
 
     def _recv_message(self):
         arr = self.s.read(MessageHeader.sizeof())
@@ -118,8 +118,43 @@ class Commander:
         print(f"got {MessageHeader.sizeof()} bytes to read {header.len}")
         return arr
 
+    def send_forward(self, dst, buf):
+        forward = Struct(
+            "mac" / Mac,
+            "buf" / Array(len(buf), Byte)
+        ).build(dict(mac=self.id_to_mac[dst], buf = buf))
+
+        b = self.format.build(dict(cmd=MessageType.FORWARD, len=len(forward), buf=forward))
+        print(b)
+        self.s.write(b)
+
+    def send_start_keep_alive(self, dst, reset_index, delay_ms, send_to_root, target_mac):
+        start_keep_alive = Struct(
+            "reset_index" / Byte,
+            "delay_ms" / Int32ul,
+            "send_to_root" / Byte,
+            "target_mac" / Array(6, Byte)
+        ).build(dict(reset_index = reset_index, delay_ms = delay_ms, send_to_root = send_to_root, target_mac=target_mac))
+
+        b = self.format.build(dict(cmd=MessageType.START_KEEP_ALIVE, len=len(start_keep_alive), buf=start_keep_alive))
+
+        self.send_forward(dst, b)
+        
+    def send_stop_keep_alive(self, dst):
+        b = self.format.build(dict(cmd=MessageType.STOP_KEEP_ALIVE, len=0, buf=b""))
+        self.send_forward(dst, b)
+
+    def send_go_to_sleep(self, dst, ms):
+        go_to_sleep = Struct(
+            "ms" / Int64ul
+        ).build(dict(ms=ms))
+
+        b = self.format.build(dict(cmd=MessageType.GO_TO_SLEEP, len=len(go_to_sleep), buf=go_to_sleep))
+
+        self.send_forward(dst, b)
+
     def send_get_nodes(self):
-        self._send_empty_command(MessageType.GET_NODES)
+        self._send_command(MessageType.GET_NODES)
         arr = self._recv_message()
         res = GetNodesReply.parse(arr)
         print(f"number of nodes {res.num_nodes}")
@@ -130,10 +165,11 @@ class Commander:
             if mac not in self.mac_to_id.keys():
                 self.mac_to_id[mac] = self.count
                 self.id_to_mac[self.count] = mac
+                print(self.count, mac)
                 self.count += 1
 
     def send_get_statistics(self):
-        self._send_empty_command(MessageType.GET_STATISTICS)
+        self._send_command(MessageType.GET_STATISTICS)
         arr = self._recv_message()
         res = StatisticsTreeInfo.parse(arr)
         print(f"number of nodes {res.num_nodes}")

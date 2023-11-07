@@ -432,7 +432,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 {
     const auto *message = reinterpret_cast<const message_t *>(buff);
     const char *message_name = type_to_name(message->type);
-    // ESP_LOGI(TAG, "message %s from: " MACSTR, message_name, MAC2STR(from->addr));
+
     switch (message->type) {
         case message_type::KEEP_ALIVE: {
             if (from) {
@@ -473,6 +473,14 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
         case message_type::GET_STATISTICS_REPLY:
             ESP_LOGW(TAG, "got non relevant message %s", message_name);
             break;
+        case message_type::FORWARD: {
+            mesh_addr_t dest;
+            memcpy(&dest, message->forward.mac, sizeof(dest));
+            ESP_LOGI(TAG, "Forwarding to %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", 
+                dest.addr[0], dest.addr[1], dest.addr[2], dest.addr[3], dest.addr[4], dest.addr[5]);
+            send_message(&dest, *(message_t*)&message->forward.payload);
+            break;
+        }
     }
     return ESP_OK;
 }

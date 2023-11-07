@@ -113,17 +113,17 @@ void esp_mesh_p2p_tx_main(void *arg)
                 continue;
     
 #ifdef PREIODIC_SLEEP
-            if ((send_count % 1000) == 0) {
+            if ((send_count % 600) == 0) {
                 send_go_to_sleep(&route_table[i], {.sleep_time_ms = 10000});
                 continue;
             } 
-#endif
-            
+                        
             if ((send_count % 500) == 0) {
                 send_start_keep_alive(&route_table[i], start_keep_alive);
             } else if ((send_count % 250) == 0) {
                 send_stop_keep_alive(&route_table[i]);
             }
+#endif
         }
         if ((send_count % 100) != 0) {
             vTaskDelay(1 * 100 / portTICK_PERIOD_MS);
