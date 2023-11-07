@@ -8,6 +8,17 @@ import log
 
 NOT_ALIVE_TIME_MS = 2000
 
+MacMap = {
+    "48:E7:29:94:D3:DD": 1,
+    "C0:49:EF:C8:7B:2D": 3,
+    "A8:42:E3:8F:72:35": 11,
+    "A8:42:E3:8F:9E:21": 12,
+    "B0:A7:32:17:8C:55": 13,
+    "CC:DB:A7:68:EB:3D": 31,
+    "CC:DB:A7:68:EA:F5": 32,
+    "CC:DB:A7:69:09:69": 33
+}
+
 MessageType = Enum(Int32ul, 
         KEEP_ALIVE = 0,
         START_KEEP_ALIVE = 1,
@@ -76,8 +87,8 @@ class Commander:
     def __init__(self, port, baudrate):
         self.s = serial.Serial(port=port, baudrate=baudrate)
         self.format = Message
-        self.id_to_mac = {}
-        self.mac_to_id = {}
+        self.mac_to_id = {Mac.build(tuple(map(lambda x: int(x,16), k.split(":")))) : v for k, v in MacMap.items()}
+        self.id_to_mac = {v : k for k, v in self.mac_to_id.items()}
         self.count = 0
 
     def __enter__(self):
@@ -260,9 +271,10 @@ class Commander:
 
     def _format_sub_tree(self, current_id, tree, info, current_ms, level=0) -> str:
         id_str = self._format_mac(current_id)
+        node_id_str = " - " + str(self.mac_to_id.get(Mac.build(current_id), "?"))
         node_info = self._format_info_for_tree(current_id, info, current_ms)
         prefix = '----' * level + (' ' if level else '')
-        res = f'{prefix}{id_str}{node_info}\n'
+        res = f'{prefix}{id_str}{node_id_str}{node_info}\n'
         for child in tree[current_id]:
             res += self._format_sub_tree(child, tree, info, current_ms, level + 1)
         return res
