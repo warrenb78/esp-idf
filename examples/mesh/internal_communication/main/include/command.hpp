@@ -25,6 +25,9 @@ enum class message_type : uint32_t {
     ECHO_REPLY,
     GET_LATENCY,
     GET_LATENCY_REPLY,
+    SET_TOPOLOGY,
+    RESTART,
+    SET_LONG_RANGE
 };
 
 enum class my_bool : uint8_t {
@@ -75,6 +78,12 @@ inline constexpr const char * type_to_name(message_type type) {
             return "get_latency";
         case message_type::GET_LATENCY_REPLY:
             return "get_latency_reply";
+        case message_type::SET_TOPOLOGY:
+            return "set_topology";
+        case message_type::RESTART:
+            return "restart";
+        case message_type::SET_LONG_RANGE:
+            return "set_long_range";
     }
     return "invalid_type";
 }
@@ -152,6 +161,14 @@ struct get_latency_reply_data {
     uint64_t end_ms;
 };
 
+struct set_topology_data {
+    uint32_t topology;
+};
+
+struct set_long_range_data {
+    uint32_t long_range;
+};
+
 struct message_t {
     message_type type;
     uint16_t len = 0;
@@ -166,6 +183,8 @@ struct message_t {
         echo_data_t echo_data; 
         get_latency_data get_latency;
         get_latency_reply_data get_latency_reply;
+        set_topology_data set_topology;
+        set_long_range_data set_long_range;
     };
 };
 

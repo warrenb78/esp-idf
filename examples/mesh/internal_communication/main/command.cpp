@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "esp_mesh.h"
 #include "esp_mesh_internal.h"
+#include "driver/gptimer.h"
 
 #include "command.hpp"
 #include "general.hpp"
@@ -442,6 +443,11 @@ void handle_get_statistics()
     send_uart_bytes((uint8_t *)&reply, sizeof(tree_info) + header_size);
 }
 
+static bool restart_esp(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
+{
+    esp_restart();
+}
+
 int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 {
     const auto *message = reinterpret_cast<const message_t *>(buff);
@@ -559,6 +565,39 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             send_message(&target, msg);
             break;
         }
+        case message_type::SET_TOPOLOGY: {
+            ESP_ERROR_CHECK(nvs_set_i32(mesh_nvs_handle, "topology", message->set_topology.topology));
+            ESP_ERROR_CHECK(nvs_commit(mesh_nvs_handle));
+            ESP_LOGI(TAG, "updating topology in next run to %ld", message->set_topology.topology);
+            break;
+        }
+        case message_type::RESTART: {
+            gptimer_handle_t gptimer = NULL;
+            gptimer_config_t timer_config = {
+                .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+                .direction = GPTIMER_COUNT_UP,
+                .resolution_hz = 1000000, // 1MHz, 1 tick=1us
+            };
+            gptimer_event_callbacks_t cbs = {
+                .on_alarm = restart_esp,
+            };
+            ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &gptimer));
+            ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer, &cbs, NULL));
+            ESP_ERROR_CHECK(gptimer_enable(gptimer));
+
+            gptimer_alarm_config_t alarm_config1 = {
+                .alarm_count = 5000000, // period = 5s
+            };
+            ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &alarm_config1));
+            ESP_ERROR_CHECK(gptimer_start(gptimer));
+            ESP_LOGE(TAG, "RESTARTING IN 5 SECONDS!");
+            break;
+        }
+        case message_type::SET_LONG_RANGE:
+            ESP_ERROR_CHECK(nvs_set_i32(mesh_nvs_handle, "long_range", message->set_long_range.long_range));
+            ESP_ERROR_CHECK(nvs_commit(mesh_nvs_handle));
+            ESP_LOGI(TAG, "updating long_range in next run to %ld", message->set_long_range.long_range);
+            break;
     }
     return ESP_OK;
 }

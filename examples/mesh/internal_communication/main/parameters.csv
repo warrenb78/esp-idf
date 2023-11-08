@@ -1,0 +1,5 @@
+key,type,encoding,value
+mesh,namespace,,
+topology,data,i32,1
+long_range,data,i32,0
+power_save,data,i32,0

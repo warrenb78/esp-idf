@@ -3,10 +3,13 @@ import sys
 from construct import *
 import serial
 import itertools
+import time
 
 import log
 
 NOT_ALIVE_TIME_MS = 2000
+
+MULTICAST = 1000
 
 MacMap = {
     "48:E7:29:94:D3:DD": 1,
@@ -16,7 +19,8 @@ MacMap = {
     "B0:A7:32:17:8C:55": 13,
     "CC:DB:A7:68:EB:3D": 31,
     "CC:DB:A7:68:EA:F5": 32,
-    "CC:DB:A7:69:09:69": 33
+    "CC:DB:A7:69:09:69": 33,
+    "FF:FF:FF:FF:FF:FF": MULTICAST
 }
 
 MessageType = Enum(Int32ul, 
@@ -35,6 +39,9 @@ MessageType = Enum(Int32ul,
         ECHO_REPLY = 12,
         GET_LATENCY = 13,
         GET_LATENCY_REPLY = 14,
+        SET_TOPOLOGY = 15,
+        RESTART = 16,
+        SET_LONG_RANGE = 17
 )
 
 MessageHeader = Struct(
@@ -89,7 +96,7 @@ class Commander:
         self.format = Message
         self.mac_to_id = {Mac.build(tuple(map(lambda x: int(x,16), k.split(":")))) : v for k, v in MacMap.items()}
         self.id_to_mac = {v : k for k, v in self.mac_to_id.items()}
-        self.count = 0
+        self.count = 100
 
     def __enter__(self):
         return self
@@ -143,12 +150,44 @@ class Commander:
     def get_latency(self, from_node, to_node):
         return self._send_get_latency(from_node, to_node)
 
+    def set_topology(self, dst, topology):
+        set_topology = Struct(
+            "topology" / Int32ul
+        ).build(dict(topology = topology))
+
+        b = self._build_command(MessageType.SET_TOPOLOGY, set_topology)
+        self._send_forward(dst, b)
+
+    def set_topology_all(self, topology):
+        for k in self.id_to_mac.keys():
+            self.set_topology(k, topology)
+
+    def set_long_range(self, dst, long_range):
+        set_long_range = Struct(
+            "long_range" / Int32ul
+        ).build(dict(long_range = long_range))
+
+        b = self._build_command(MessageType.SET_LONG_RANGE, set_long_range)
+        self._send_forward(dst, b)
+
+    def set_long_range_all(self, long_range):
+        for k in self.id_to_mac.keys():
+            self.set_long_range(k, long_range)
+
+    def restart(self, dst):
+        b = self._build_command(MessageType.RESTART)
+        self._send_forward(dst, b)
+
+    def restart_all(self):
+        for k in self.id_to_mac.keys():
+            self.restart(k)
+
     def _build_command(self, cmd, buf=b''):
         return self.format.build(dict(header = dict(cmd=cmd, len=len(buf)), buf=buf))
 
     def _send_command(self, cmd, buf=b''):
         b = self._build_command(cmd, buf)
-        _LOGGER.debug(f'Sending cmd {cmd}: data {b}')
+        _LOGGER.info(f'Sending cmd {cmd}: data {b}')
         self.s.write(b)
 
     def _recv_message(self):

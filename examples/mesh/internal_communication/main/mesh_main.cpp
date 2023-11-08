@@ -383,15 +383,21 @@ void ip_event_handler(void *arg, esp_event_base_t event_base,
 
 }
 
+nvs_handle_t mesh_nvs_handle;
+
 void app_mesh_start()
 {
     /* mesh initialization */
     ESP_ERROR_CHECK(esp_mesh_init());
     ESP_ERROR_CHECK(esp_mesh_fix_root(true));
     ESP_ERROR_CHECK(esp_event_handler_register(MESH_EVENT, ESP_EVENT_ANY_ID, &mesh_event_handler, NULL));
+
+    esp_mesh_topology_t topology;
+    ESP_ERROR_CHECK(nvs_get_i32(mesh_nvs_handle, "topology", reinterpret_cast<int32_t*>(&topology)));
+    ESP_LOGI(MESH_TAG, "topology = %d", topology);
     /*  set mesh topology */
-    ESP_ERROR_CHECK(esp_mesh_set_topology(
-        static_cast<esp_mesh_topology_t>(CONFIG_MESH_TOPOLOGY)));
+    ESP_ERROR_CHECK(esp_mesh_set_topology(topology));
+    ESP_LOGI(MESH_TAG, "Set topology %s", topology ? "MESH_TOPO_CHAIN": "MESH_TOPO_TREE");
     /*  set mesh max layer according to the topology */
     ESP_ERROR_CHECK(esp_mesh_set_max_layer(CONFIG_MESH_MAX_LAYER));
     ESP_ERROR_CHECK(esp_mesh_set_vote_percentage(1));
@@ -452,11 +458,23 @@ void app_mesh_start()
              esp_mesh_get_topology(), esp_mesh_get_topology() ? "(chain)":"(tree)", esp_mesh_is_ps_enabled());
 }
 
+void set_protocol()
+{
+    int long_range;
+    ESP_ERROR_CHECK(nvs_get_i32(mesh_nvs_handle, "long_range", reinterpret_cast<int32_t*>(&long_range)));
+    if (long_range) {
+        ESP_LOGI(MESH_TAG, "Entering Long Range mode!");
+        ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_LR));
+        ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_LR));
+    }
+}
+
 extern "C" void app_main(void)
 {
     create_uart_task();
     ESP_ERROR_CHECK(mesh_light_init());
     ESP_ERROR_CHECK(nvs_flash_init());
+    ESP_ERROR_CHECK(nvs_open("mesh", NVS_READWRITE, &mesh_nvs_handle));
     /*  tcpip initialization */
     ESP_ERROR_CHECK(esp_netif_init());
     /*  event initialization */
@@ -468,6 +486,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(esp_wifi_init(&config));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+    set_protocol();
     ESP_ERROR_CHECK(esp_wifi_start());
     app_mesh_start();
 }
