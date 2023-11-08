@@ -4,6 +4,7 @@ from construct import *
 import serial
 import itertools
 import time
+import threading
 
 import log
 
@@ -322,6 +323,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('-l', '--log-path', help='Path to text loger', default='mesh.log')
     return parser
+
+def foo(x):
+    t = threading.Timer(0.001, lambda: foo(x+1))
+    print(x)
+    t.start()
+
+def run_transmission_info(commander, seconds):
+    def foo(seconds_left):
+        if seconds_left == 0:
+            return
+        commander.transmission_info()
+        t = threading.Timer(1, lambda: foo(seconds_left-1))
+        t.start()
+
+    foo(seconds)
 
 if __name__ == '__main__':
     args = build_parser().parse_args()
