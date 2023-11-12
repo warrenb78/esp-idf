@@ -19,11 +19,18 @@
 #include "nvs_flash.h"
 #include "command.hpp"
 #include "uart_commander.hpp"
-
+#include "general.hpp"
+#if defined(USE_ZHNETWORK)
+#include "ZHNetwork.h"
+#endif
 
 /*******************************************************
  *                Macros
  *******************************************************/
+
+#if defined(USE_ZHNETWORK)
+ZHNetwork network;
+#endif
 
 /*******************************************************
  *                Constants
@@ -95,6 +102,7 @@ void esp_mesh_p2p_tx_main(void *arg)
         }
         send_count++;
 
+#ifdef PREIODIC_SLEEP
         start_keep_alive_data start_keep_alive{
             .reset_index = my_bool::TRUE,
             .delay_ms = 1,
@@ -102,6 +110,7 @@ void esp_mesh_p2p_tx_main(void *arg)
             .payload_size = MESH_MTU_SIZE,
             .target_mac{},
         };
+#endif
 
         if ((send_count % 600) == 0) {
             print_statistics();
@@ -469,11 +478,55 @@ void set_protocol()
     }
 }
 
+void on_zhrecv_message(const char *message, const uint8_t *src_mac) {
+    ESP_LOGI(MESH_TAG, "Recv message from " MACSTR ", msg %s", MAC2STR(src_mac), message);
+}
+
+void zh_task(void *arg)
+{
+    static size_t i = 0;
+    while (true) {
+        network.maintenance();
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ++i;
+        if ((i % 100) == 0) {
+            uint8_t target[6] = {0xec, 0x94, 0xcb, 0x4d, 0x9e, 0x60};
+            network.sendUnicastMessage("Test, ", target);
+            // network.sendBroadcastMessage("Test,");
+        }
+    }
+}
+
 extern "C" void app_main(void)
 {
     create_uart_task();
+#ifdef USE_ZHNETWORK
     ESP_ERROR_CHECK(mesh_light_init());
     ESP_ERROR_CHECK(nvs_flash_init());
+    /*  tcpip initialization */
+    ESP_ERROR_CHECK(esp_netif_init());
+    /*  event initialization */
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    /*  create network interfaces for mesh (only station instance saved for further manipulation, soft AP instance ignored */
+    ESP_ERROR_CHECK(esp_netif_create_default_wifi_mesh_netifs(&netif_sta, NULL));
+    /*  wifi initialization */
+    wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&config));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+    // set_protocol();
+    ESP_ERROR_CHECK(esp_wifi_start());
+    
+    unsigned char mac_base[6] = {0};
+    esp_efuse_mac_get_default(mac_base);
+    esp_read_mac(mac_base, ESP_MAC_WIFI_STA);
+    ESP_LOGI(MESH_TAG, "mac local base:" MACSTR, MAC2STR(mac_base));
+
+    network.begin();
+    network.setOnUnicastReceivingCallback(on_zhrecv_message);
+    network.setOnBroadcastReceivingCallback(on_zhrecv_message);
+    xTaskCreate(zh_task, "zh_task", 8192, NULL, 10, NULL);
+#else /* USE_ZHNETWORK */
     ESP_ERROR_CHECK(nvs_open("mesh", NVS_READWRITE, &mesh_nvs_handle));
     /*  tcpip initialization */
     ESP_ERROR_CHECK(esp_netif_init());
@@ -489,4 +542,5 @@ extern "C" void app_main(void)
     set_protocol();
     ESP_ERROR_CHECK(esp_wifi_start());
     app_mesh_start();
+#endif /* USE_ZHNETWORK */
 }
