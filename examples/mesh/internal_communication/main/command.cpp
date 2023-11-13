@@ -272,13 +272,15 @@ static __attribute__((aligned(16))) uint8_t tx_buf[MESH_MTU_SIZE] = { 0, };
 int send_keep_alive(const mesh_addr_t *to, uint16_t extra_size)
 {
     int rssi = 0;
-    int err = esp_wifi_sta_get_rssi(&rssi);
-    if (err)
-        return err;
-
     mesh_addr_t parent{};
     uint8_t layer{};
 #ifndef USE_ZHNETWORK
+    int err = esp_wifi_sta_get_rssi(&rssi);
+    if (err) {
+        ESP_LOGE(TAG, "Failed to get rssi %d", err);
+        return err;
+    }
+
     err = esp_mesh_get_parent_bssid(&parent);
     if (err)
         return err;

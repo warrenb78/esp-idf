@@ -58,14 +58,16 @@ public:
         return 200;
     }
 
+    constexpr static uint8_t BROADCAST[6]{0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
     int send(uint8_t *msg, size_t msg_size, const uint8_t *mac) override {
         // TODO: Decide about confirm parameter policy
-        // TODO: Use msg_size once zh is fixed
-        // TODO: Remove the char cast of message once zh is fixed.
-        (void)msg_size;
         bool confirm = false;
 
-        return _network->sendUnicastMessage(reinterpret_cast<char *>(msg), mac, confirm);
+        if (memcmp(mac, BROADCAST, sizeof(BROADCAST)) == 0) {
+            return _network->sendBroadcastMessage(msg, msg_size);
+        }
+        return _network->sendUnicastMessage(msg, msg_size, mac, confirm);
     }
 
 private:

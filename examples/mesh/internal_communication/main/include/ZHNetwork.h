@@ -19,14 +19,17 @@
 
 // #define PRINT_LOG // Uncomment to display to serial port the full operation log.
 
+constexpr static size_t NET_NAME_SIZE = 20;
+
 typedef struct
 {
     uint8_t messageType{0};
+    uint8_t messageSize{0};
     uint16_t messageID{0};
-    char netName[20]{0};
+    char netName[NET_NAME_SIZE]{0};
     uint8_t originalTargetMAC[6]{0};
     uint8_t originalSenderMAC[6]{0};
-    char message[200]{0};
+    uint8_t message[200]{0};
 } transmitted_data_t;
 
 typedef struct
@@ -40,6 +43,9 @@ typedef struct
     uint8_t intermediateSenderMAC[6]{0};
     transmitted_data_t transmittedData;
 } incoming_data_t;
+
+static_assert(sizeof(outgoing_data_t) < 256, "Message too large");
+static_assert(sizeof(incoming_data_t) < 256, "Message too large");
 
 typedef struct
 {
@@ -83,7 +89,7 @@ typedef enum // Just for further development.
     ERROR = 0
 } error_code_t;
 
-typedef std::function<void(const char *, const uint8_t *)> on_message_t;
+typedef std::function<void(const uint8_t *, uint8_t, const uint8_t *)> on_message_t;
 typedef std::function<void(const uint8_t *, const uint16_t, const bool)> on_confirm_t;
 typedef std::vector<routing_table_t> routing_vector_t;
 typedef std::vector<confirmation_waiting_data_t> confirmation_vector_t;
@@ -100,8 +106,8 @@ public:
 
     error_code_t begin(const char *netName = "", const bool gateway = false);
 
-    uint16_t sendBroadcastMessage(const char *data);
-    uint16_t sendUnicastMessage(const char *data, const uint8_t *target, const bool confirm = false);
+    uint16_t sendBroadcastMessage(const uint8_t *data, uint8_t size);
+    uint16_t sendUnicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const bool confirm = false);
 
     void maintenance(void);
 
@@ -152,8 +158,8 @@ private:
     static void onDataSent(const uint8_t *mac, esp_now_send_status_t status);
     static void onDataReceive(const esp_now_recv_info_t *mac, const uint8_t *data, int length);
 #endif
-    uint16_t broadcastMessage(const char *data, const uint8_t *target, message_type_t type);
-    uint16_t unicastMessage(const char *data, const uint8_t *target, const uint8_t *sender, message_type_t type);
+    uint16_t broadcastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, message_type_t type);
+    uint16_t unicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const uint8_t *sender, message_type_t type);
     on_message_t onBroadcastReceivingCallback;
     on_message_t onUnicastReceivingCallback;
     on_confirm_t onConfirmReceivingCallback;

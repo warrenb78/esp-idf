@@ -481,10 +481,9 @@ void set_protocol()
     }
 }
 
-void on_zhrecv_message(const char *message, const uint8_t *src_mac) {
-    ESP_LOGI(MESH_TAG, "Recv message from " MACSTR ", msg %s", MAC2STR(src_mac), message);
-    handle_message(reinterpret_cast<const mesh_addr_t *>(src_mac),
-                   reinterpret_cast<const uint8_t *>(message), strlen(message));
+void on_zhrecv_message(const uint8_t *message, uint8_t size, const uint8_t *src_mac) {
+    ESP_LOGI(MESH_TAG, "Recv message from " MACSTR ", msg size %u", MAC2STR(src_mac), size);
+    handle_message(reinterpret_cast<const mesh_addr_t *>(src_mac), message, size);
 }
 
 void zh_task(void *arg)
@@ -497,7 +496,8 @@ void zh_task(void *arg)
         if ((i % 100) == 0) {
             // uint8_t target[6] = {0xec, 0x94, 0xcb, 0x4d, 0x9e, 0x60};
             // network.sendUnicastMessage("Test, ", target);
-            network.sendBroadcastMessage("Test ");
+            //uint8_t msg[] = "Test, ";
+            //network.sendBroadcastMessage(msg, sizeof(msg));
         }
     }
 }

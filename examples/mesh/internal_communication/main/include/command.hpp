@@ -39,7 +39,7 @@ enum class my_bool : uint8_t {
 };
 
 inline bool to_bool(my_bool b) {
-    return static_cast<bool>(b);
+    return my_bool::TRUE == b;
 }
 
 inline my_bool from_bool(bool b) {
