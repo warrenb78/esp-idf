@@ -30,6 +30,9 @@
 
 #if defined(USE_ZHNETWORK)
 ZHNetwork network;
+static ZHSender g_sender{&network};
+#else
+static MeshSender g_sender{};
 #endif
 
 /*******************************************************
@@ -480,6 +483,8 @@ void set_protocol()
 
 void on_zhrecv_message(const char *message, const uint8_t *src_mac) {
     ESP_LOGI(MESH_TAG, "Recv message from " MACSTR ", msg %s", MAC2STR(src_mac), message);
+    handle_message(reinterpret_cast<const mesh_addr_t *>(src_mac),
+                   reinterpret_cast<const uint8_t *>(message), strlen(message));
 }
 
 void zh_task(void *arg)
@@ -490,9 +495,9 @@ void zh_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(10));
         ++i;
         if ((i % 100) == 0) {
-            uint8_t target[6] = {0xec, 0x94, 0xcb, 0x4d, 0x9e, 0x60};
-            network.sendUnicastMessage("Test, ", target);
-            // network.sendBroadcastMessage("Test,");
+            // uint8_t target[6] = {0xec, 0x94, 0xcb, 0x4d, 0x9e, 0x60};
+            // network.sendUnicastMessage("Test, ", target);
+            network.sendBroadcastMessage("Test ");
         }
     }
 }
@@ -500,6 +505,7 @@ void zh_task(void *arg)
 extern "C" void app_main(void)
 {
     create_uart_task();
+    set_sender(&g_sender);
 #ifdef USE_ZHNETWORK
     ESP_ERROR_CHECK(mesh_light_init());
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -526,7 +532,9 @@ extern "C" void app_main(void)
     network.setOnUnicastReceivingCallback(on_zhrecv_message);
     network.setOnBroadcastReceivingCallback(on_zhrecv_message);
     xTaskCreate(zh_task, "zh_task", 8192, NULL, 10, NULL);
+    xTaskCreate(keep_alive_task, "MPKeepAlive", 3072, nullptr, 5, nullptr);
 #else /* USE_ZHNETWORK */
+    
     ESP_ERROR_CHECK(nvs_open("mesh", NVS_READWRITE, &mesh_nvs_handle));
     /*  tcpip initialization */
     ESP_ERROR_CHECK(esp_netif_init());

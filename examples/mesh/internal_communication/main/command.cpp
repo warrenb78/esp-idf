@@ -14,7 +14,15 @@
 #include "uart_commander.hpp"
 
 static const char *TAG = "command";
-
+#if defined(USE_ZHNETWORK)
+const start_keep_alive_data BASIC_KEEP_ALIVE {
+    .reset_index = my_bool::TRUE,
+    .delay_ms = 500, // 2 Hz,
+    .send_to_root = my_bool::FALSE,
+    .payload_size = 0,
+    .target_mac{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+};
+#else
 const start_keep_alive_data BASIC_KEEP_ALIVE {
     .reset_index = my_bool::TRUE,
     .delay_ms = 500, // 2 Hz,
@@ -22,6 +30,7 @@ const start_keep_alive_data BASIC_KEEP_ALIVE {
     .payload_size = 0,
     .target_mac{},
 };
+#endif
 
 uint32_t get_message_count(bool reset);
 
@@ -220,7 +229,12 @@ private:
     map_t<mesh_addr_t, metrics> _info;
 };
 
-keep_aliver g_keep_alive;
+static keep_aliver g_keep_alive;
+static ISender *g_sender;
+
+void set_sender(ISender *sender) {
+    g_sender = sender;
+}
 
 void keep_alive_task(void *arg) {
     (void)arg;
@@ -244,32 +258,13 @@ uint32_t get_message_count(bool reset)
 }
 
 int send_message(const mesh_addr_t *to, message_t &message, size_t size = sizeof(message_t)){
-    mesh_data_t data;
     message.len = size - header_size;
-    data.data = (uint8_t *)&message;
-    data.size = size;
-    if (data.size > MESH_MTU_SIZE) {
-        ESP_LOGE(TAG, "message to large %u limit %u", data.size, MESH_MTU_SIZE);
+    if (!g_sender) {
+        ESP_LOGE(TAG, "Tried to send while sender not set");
         return ESP_FAIL;
     }
-    data.proto = MESH_PROTO_BIN;
-    data.tos = MESH_TOS_P2P;
-    int flag = [&]() -> int {
-        if (to == nullptr)
-            return 0;
-        return MESH_DATA_P2P;
-    }();
 
-    int err = esp_mesh_send(to, &data, flag, nullptr, 0);
-    if (err != ESP_OK) {
-        if (to) {
-            ESP_LOGE(TAG, "Got error %d when trying to send to " MACSTR, err, MAC2STR(to->addr));
-        } else {
-            ESP_LOGE(TAG, "Got error %d when trying to send to root", err);
-        }
-        return err;
-    }
-    return ESP_OK;
+    return g_sender->send(reinterpret_cast<uint8_t *>(&message), size, to->addr);
 }
 
 static __attribute__((aligned(16))) uint8_t tx_buf[MESH_MTU_SIZE] = { 0, };
@@ -281,10 +276,15 @@ int send_keep_alive(const mesh_addr_t *to, uint16_t extra_size)
     if (err)
         return err;
 
-    mesh_addr_t parent;
+    mesh_addr_t parent{};
+    uint8_t layer{};
+#ifndef USE_ZHNETWORK
     err = esp_mesh_get_parent_bssid(&parent);
     if (err)
         return err;
+
+    layer = static_cast<uint8_t>(esp_mesh_get_layer());
+#endif
 
     message_t &message = *reinterpret_cast<message_t *>(tx_buf);
     message = {
@@ -294,7 +294,7 @@ int send_keep_alive(const mesh_addr_t *to, uint16_t extra_size)
             .timestamp = esp_timer_get_time() / 1000ull,
             .rssi = rssi, 
             .parent_mac = {},
-            .layer = static_cast<uint8_t>(esp_mesh_get_layer()),
+            .layer = layer,
             .payload_size = extra_size,
             .payload = {}
         },

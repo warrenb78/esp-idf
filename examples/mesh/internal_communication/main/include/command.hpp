@@ -3,6 +3,9 @@
 
 #include <cstdint>
 #include <string_view>
+
+#include "sender.hpp"
+
 #include "esp_mesh.h"
 
 #define MESH_MTU_SIZE          (1460)
@@ -194,6 +197,8 @@ constexpr inline size_t keep_alive_size = header_size + sizeof(keep_alive_data);
 constexpr inline size_t fwd_size = 7;
 
 #pragma pack(pop)
+
+void set_sender(ISender *sender);
 
 int send_keep_alive(const mesh_addr_t *to, uint16_t extra_size);
 
