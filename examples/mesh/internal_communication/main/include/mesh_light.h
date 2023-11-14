@@ -54,7 +54,7 @@ typedef struct {
  *******************************************************/
 esp_err_t mesh_light_init(void);
 esp_err_t mesh_light_set(int color);
-esp_err_t mesh_light_process(mesh_addr_t *from, uint8_t *buf, uint16_t len);
+// esp_err_t mesh_light_process(mesh_addr_t *from, uint8_t *buf, uint16_t len);
 void mesh_connected_indicator(int layer);
 void mesh_disconnected_indicator(void);
 

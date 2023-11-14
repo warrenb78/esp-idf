@@ -145,7 +145,7 @@ private:
     const char *firmware{"1.42"};
     const uint8_t broadcastMAC[6]{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     uint8_t maxNumberOfAttempts_{3};
-    uint8_t maxWaitingTimeBetweenTransmissions_{50};
+    uint8_t maxWaitingTimeBetweenTransmissions_{5};
     uint8_t numberOfAttemptsToSend{1};
     uint16_t maxTimeForRoutingInfoWaiting_{500};
     uint32_t lastMessageSentTime{0};

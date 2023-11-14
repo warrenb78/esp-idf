@@ -3,6 +3,7 @@ idf_component_register(SRCS "mesh_light.c"
                             "command.cpp"
                             "uart_commander.cpp"
                             "ZHNetwork.cpp"
+                            "zh.cpp"
                     INCLUDE_DIRS "." "include")
 
 component_compile_options(-Wmissing-field-initializers)

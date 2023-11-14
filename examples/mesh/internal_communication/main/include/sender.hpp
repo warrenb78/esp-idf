@@ -5,6 +5,7 @@
 
 #include <esp_mesh.h>
 #include <esp_mac.h>
+#include "esp_log.h"
 
 #include "ZHNetwork.h"
 
@@ -72,6 +73,31 @@ public:
 
 private:
     ZHNetwork *_network;
+};
+
+class QueueSender : public ISender {
+public:
+    explicit QueueSender() : msgbuf() {
+        msgbuf = xMessageBufferCreate(1024);
+    }
+
+    size_t get_mtu_size() const override {
+        return 200;
+    }
+
+    int send(uint8_t *msg, size_t msg_size, const uint8_t *mac) override {
+        xMessageBufferSend(msgbuf, mac, 6, portMAX_DELAY);
+        return xMessageBufferSend(msgbuf, msg, msg_size, portMAX_DELAY);
+    }
+
+    int receive(uint8_t *msg, size_t msg_size, uint8_t *mac) {
+        size_t bytes = xMessageBufferReceive(msgbuf, mac, 6, pdMS_TO_TICKS(10));
+        if (bytes == 0)
+            return 0;
+        return xMessageBufferReceive(msgbuf, msg, msg_size, portMAX_DELAY);
+    }
+private:
+    MessageBufferHandle_t msgbuf;
 };
 
 #ifdef SENDER_UNSET_TAG

@@ -7,7 +7,7 @@
 #include "esp_log.h"
 
 #define TAG "ZHNetwork"
-#define PRINT_LOG
+// #define PRINT_LOG
 
 routing_vector_t ZHNetwork::routingVector;
 confirmation_vector_t ZHNetwork::confirmationVector;
@@ -665,6 +665,7 @@ uint16_t ZHNetwork::unicastMessage(const uint8_t *data, uint8_t size, const uint
         }
     }
     memcpy(&outgoingData.intermediateTargetMAC, target, 6);
+    ESP_LOGI(TAG, "queueForOutgoingData.size() = %d", queueForOutgoingData.size());
     queueForOutgoingData.push(outgoingData);
 #ifdef PRINT_LOG
     ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s not found. Target is %s.",

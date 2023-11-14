@@ -63,7 +63,7 @@ public:
             if (_do_work) {
                 const auto *target = [&]() -> const mesh_addr_t *{
                     if (_send_to_root) {
-                        return nullptr;   
+                        return &root;   
                     }
                     return &_target;
                 }();
@@ -83,6 +83,7 @@ private:
     TickType_t _delay_ticks;
     bool _send_to_root;
     mesh_addr_t _target;
+    constexpr static mesh_addr_t root ={.addr = {0xEC, 0x94, 0xCB, 0x4D, 0xA5, 0x1C}};
     uint16_t _extra_size;
 };
 
@@ -263,7 +264,6 @@ int send_message(const mesh_addr_t *to, message_t &message, size_t size = sizeof
         ESP_LOGE(TAG, "Tried to send while sender not set");
         return ESP_FAIL;
     }
-
     return g_sender->send(reinterpret_cast<uint8_t *>(&message), size, to->addr);
 }
 
@@ -450,6 +450,8 @@ static bool restart_esp(gptimer_handle_t timer, const gptimer_alarm_event_data_t
     esp_restart();
 }
 
+mesh_addr_t save_mac_for_latency;
+
 int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 {
     const auto *message = reinterpret_cast<const message_t *>(buff);
@@ -516,6 +518,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
                 ESP_LOGI(TAG, "Forwarding to %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", 
                     dest.addr[0], dest.addr[1], dest.addr[2], dest.addr[3], dest.addr[4], dest.addr[5]);
                 send_message(&dest, *(message_t*)&message->forward.payload, message->len - fwd_size);
+                ESP_LOGI(TAG, "After sending message to queue");
             }
             break;
         }
@@ -524,7 +527,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             message_t &msg = *reinterpret_cast<message_t *>(tx_buf);
             memcpy(&msg, message, size);
             msg.type = message_type::ECHO_REPLY;
-            send_message(from, msg);
+            send_message(from, msg, size);
             break;
         }
         case message_type::ECHO_REPLY: {
@@ -549,7 +552,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             ESP_LOGI(TAG, "got echo reply %llu --> %llu",
                      inner.get_latency_reply.start_ms,
                      inner.get_latency_reply.end_ms);
-            send_message(nullptr, reply, header_size * 2 + sizeof(forward_data) + sizeof(get_latency_reply_data));
+            send_message(&save_mac_for_latency, reply, header_size * 2 + sizeof(forward_data) + sizeof(get_latency_reply_data));
             break;
         }
         case message_type::GET_LATENCY: {
@@ -564,7 +567,8 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             ESP_LOGI(TAG, "send get echo to " MACSTR, MAC2STR(message->get_latency.dst));
             mesh_addr_t target{};
             memcpy(target.addr, message->get_latency.dst, sizeof(target.addr));
-            send_message(&target, msg);
+            memcpy(&save_mac_for_latency, from, sizeof(*from));
+            send_message(&target, msg, sizeof(echo_data_t) + header_size);
             break;
         }
         case message_type::SET_TOPOLOGY: {
