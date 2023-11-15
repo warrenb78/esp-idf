@@ -45,6 +45,7 @@ static MeshSender g_sender{}asd;
 /*******************************************************
  *                Variable Definitions
  *******************************************************/
+#ifndef USE_ZHNETWORK
 static const char *MESH_TAG = "mesh_main";
 static const uint8_t MESH_ID[6] = { 0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
 static __attribute__((aligned(16))) uint8_t rx_buf[RX_SIZE] = { 0, };
@@ -481,7 +482,7 @@ void set_protocol()
         ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_LR));
     }
 }
-
+#endif /* ZHNetwork */
 extern "C" void app_main(void)
 {
     create_uart_task();

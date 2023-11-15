@@ -70,10 +70,8 @@ static void uart_task(void *arg)
 
         // Write data back to the UART
         if (len) {
-            ESP_LOGI(TAG, "Read ""%d"" bytes", len);
             handle_message(NULL, data, len);
             data[len] = '\0';
-            ESP_LOGI(TAG, "Recv str: %s", (char *) data);
         }
     }
 }

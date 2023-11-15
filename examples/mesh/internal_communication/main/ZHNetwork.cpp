@@ -7,7 +7,9 @@
 #include "esp_log.h"
 
 #define TAG "ZHNetwork"
-// #define PRINT_LOG
+#define PRINT_LOG
+
+#define MAX_LAYERS 5
 
 routing_vector_t ZHNetwork::routingVector;
 confirmation_vector_t ZHNetwork::confirmationVector;
@@ -225,8 +227,9 @@ void ZHNetwork::maintenance()
         {
         case BROADCAST:
 #ifdef PRINT_LOG
-            ESP_LOGI(TAG, "BROADCAST message from MAC %s received.",
-                    macToString(incomingData.transmittedData.originalSenderMAC).c_str());
+            ESP_LOGI(TAG, "BROADCAST message from MAC %s received with ttl = %d.",
+                    macToString(incomingData.transmittedData.originalSenderMAC).c_str(),
+                    incomingData.transmittedData.ttl);
 #endif
             if (onBroadcastReceivingCallback)
             {
@@ -236,14 +239,18 @@ void ZHNetwork::maintenance()
                 onBroadcastReceivingCallback(incomingData.transmittedData.message, incomingData.transmittedData.messageSize,
                                              incomingData.transmittedData.originalSenderMAC);
             }
-            forward = true;
+            if(incomingData.transmittedData.ttl) {
+                incomingData.transmittedData.ttl--;
+                forward = true;
+            }
             break;
         case UNICAST:
 #ifdef PRINT_LOG
-            ESP_LOGI(TAG, "UNICAST message from MAC %s to MAC %s via MAC %s received.",
+            ESP_LOGI(TAG, "UNICAST message from MAC %s to MAC %s via MAC %s received with ttl = %d.",
                     macToString(incomingData.transmittedData.originalSenderMAC).c_str(),
                     macToString(incomingData.transmittedData.originalTargetMAC).c_str(),
-                    macToString(incomingData.intermediateSenderMAC).c_str());
+                    macToString(incomingData.intermediateSenderMAC).c_str(),
+                    incomingData.transmittedData.ttl);
 #endif
             if (detail::compare_mac(incomingData.transmittedData.originalTargetMAC, localMAC))
             {
@@ -325,8 +332,12 @@ void ZHNetwork::maintenance()
             if (detail::compare_mac(incomingData.transmittedData.originalTargetMAC, localMAC)) {
                 uint8_t empty{};
                 broadcastMessage(&empty, 0, incomingData.transmittedData.originalSenderMAC, SEARCH_RESPONSE);
-            } else
-                forward = true;
+            } else {
+                if(incomingData.transmittedData.ttl) {
+                    incomingData.transmittedData.ttl--;
+                    forward = true;
+                }
+            }
             routingUpdate = true;
             break;
         case SEARCH_RESPONSE:
@@ -336,7 +347,11 @@ void ZHNetwork::maintenance()
                     macToString(incomingData.transmittedData.originalTargetMAC).c_str());
 #endif
             if (!detail::compare_mac(incomingData.transmittedData.originalTargetMAC, localMAC))
-                forward = true;
+                if(incomingData.transmittedData.ttl) {
+                    incomingData.transmittedData.ttl--;
+                    forward = true;
+                }
+            }
             routingUpdate = true;
             break;
         default:
@@ -351,7 +366,6 @@ void ZHNetwork::maintenance()
                 memcpy(&outgoingData->transmittedData, &incomingData.transmittedData, sizeof(transmitted_data_t));
                 memcpy(&outgoingData->intermediateTargetMAC, &broadcastMAC, 6);
                 queueForOutgoingData.push(std::move(outgoingData));
-                //vTaskDelay(pdMS_TO_TICKS(random(10)));
             }
         }
         if (routingUpdate)
@@ -619,6 +633,7 @@ uint16_t ZHNetwork::broadcastMessage(const uint8_t *data, uint8_t size, const ui
     }
     outgoingData->transmittedData.messageType = type;
     outgoingData->transmittedData.messageID = ((uint16_t)random(32767) << 8) | (uint16_t)random(32767);
+    outgoingData->transmittedData.ttl = MAX_LAYERS;
     memcpy(&outgoingData->transmittedData.netName, &netName_, NET_NAME_SIZE);
     memcpy(&outgoingData->transmittedData.originalTargetMAC, target, 6);
     memcpy(&outgoingData->transmittedData.originalSenderMAC, &localMAC, 6);
@@ -666,6 +681,7 @@ uint16_t ZHNetwork::unicastMessage(const uint8_t *data, uint8_t size, const uint
     outgoing_data_t &outgoingData = *outgoingDataElem;
     outgoingData.transmittedData.messageType = type;
     outgoingData.transmittedData.messageID = ((uint16_t)random(32767) << 8) | (uint16_t)random(32767);
+    outgoingData.transmittedData.ttl = MAX_LAYERS;
     memcpy(&outgoingData.transmittedData.netName, &netName_, NET_NAME_SIZE);
     memcpy(&outgoingData.transmittedData.originalTargetMAC, target, 6);
     memcpy(&outgoingData.transmittedData.originalSenderMAC, sender, 6);

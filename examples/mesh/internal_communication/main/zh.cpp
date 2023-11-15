@@ -20,28 +20,14 @@ static uint8_t mac[6];
 void zh_task(void *arg)
 {
     while (true) {
-        TickType_t start_maintenance = xTaskGetTickCount();
         network.maintenance();
-        TickType_t end_maintenance = xTaskGetTickCount();
         uint8_t bytes = g_sender.receive(buf, sizeof(buf), mac);
-        TickType_t found_bytes = xTaskGetTickCount();
-
-        constexpr static uint8_t BROADCAST[6]{0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-        // ESP_LOGI(TAG, "found %d bytes to send", bytes);
         if (bytes != 0) {
-            bool confirm = false;
-            if (memcmp(mac, BROADCAST, sizeof(BROADCAST)) == 0) {
+            if (memcmp(mac, network.broadcastMAC, sizeof(network.broadcastMAC)) == 0)
                 network.sendBroadcastMessage(buf, bytes);
-            } else {
-                network.sendUnicastMessage(buf, bytes, mac, confirm);
-            }
+            else
+                network.sendUnicastMessage(buf, bytes, mac);
         }
-        // if (bytes == 0) {
-        //     // ESP_LOGI(TAG, "are you sleeping?!");
-        //     vTaskDelay(pdMS_TO_TICKS(10));
-        // }
-        TickType_t treating_bytes = xTaskGetTickCount();
-        // ESP_LOGI(TAG, "%ld %ld %ld %ld", start_maintenance, end_maintenance, found_bytes, treating_bytes);
     }
 }
 

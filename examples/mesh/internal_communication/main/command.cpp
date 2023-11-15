@@ -426,6 +426,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             g_keep_alive.start(BASIC_KEEP_ALIVE);
             break;
         case message_type::GO_TO_SLEEP: {
+            #ifndef USE_ZHNETWORK
             ESP_LOGW(TAG, "message %s from: " MACSTR " going to sleep for %llu ms",
                      message_name, MAC2STR(from->addr), message->go_to_sleep.sleep_time_ms);
             g_keep_alive.stop();
@@ -435,6 +436,9 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
                      message_name, MAC2STR(from->addr));
             app_mesh_start();
             g_keep_alive.start(BASIC_KEEP_ALIVE);
+            #else
+            ESP_LOGW(TAG, "GO_TO_SLEEP not implemented");
+            #endif
             break;
         }
         case message_type::BECOME_ROOT:
@@ -524,9 +528,13 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             break;
         }
         case message_type::SET_TOPOLOGY: {
+            #ifndef USE_ZHNETWORK
             ESP_ERROR_CHECK(nvs_set_i32(mesh_nvs_handle, "topology", message->set_topology.topology));
             ESP_ERROR_CHECK(nvs_commit(mesh_nvs_handle));
             ESP_LOGI(TAG, "updating topology in next run to %ld", message->set_topology.topology);
+            #else
+            ESP_LOGW(TAG, "SET_TOPOLOGY irrelevant in ZHNetwork");
+            #endif
             break;
         }
         case message_type::RESTART: {
@@ -535,6 +543,8 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
                 .clk_src = GPTIMER_CLK_SRC_DEFAULT,
                 .direction = GPTIMER_COUNT_UP,
                 .resolution_hz = 1000000, // 1MHz, 1 tick=1us
+                .intr_priority = 0,
+                .flags = {.intr_shared = 0}
             };
             gptimer_event_callbacks_t cbs = {
                 .on_alarm = restart_esp,
@@ -545,6 +555,8 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
 
             gptimer_alarm_config_t alarm_config1 = {
                 .alarm_count = 5000000, // period = 5s
+                .reload_count = 0, // ignored, here to prevent warnings
+                .flags = {}
             };
             ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &alarm_config1));
             ESP_ERROR_CHECK(gptimer_start(gptimer));
@@ -552,9 +564,13 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
             break;
         }
         case message_type::SET_LONG_RANGE:
+            #ifndef USE_ZHNETWORK
             ESP_ERROR_CHECK(nvs_set_i32(mesh_nvs_handle, "long_range", message->set_long_range.long_range));
             ESP_ERROR_CHECK(nvs_commit(mesh_nvs_handle));
             ESP_LOGI(TAG, "updating long_range in next run to %ld", message->set_long_range.long_range);
+            #else
+            ESP_LOGW(TAG, "SET_LONG_RANGE irrelevant in ZHNetwork");
+            #endif
             break;
     }
     return ESP_OK;

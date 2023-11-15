@@ -32,6 +32,7 @@ typedef struct
     char netName[NET_NAME_SIZE]{0};
     uint8_t originalTargetMAC[6]{0};
     uint8_t originalSenderMAC[6]{0};
+    uint8_t ttl;
     uint8_t message[200]{0};
 } transmitted_data_t;
 
@@ -133,6 +134,7 @@ public:
     error_code_t setMaxWaitingTimeForRoutingInfo(const uint16_t maxTimeForRoutingInfoWaiting);
     uint16_t getMaxWaitingTimeForRoutingInfo(void);
 
+    static constexpr uint8_t broadcastMAC[6]{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 private:
     static routing_vector_t routingVector;
     static confirmation_vector_t confirmationVector;
@@ -150,7 +152,6 @@ private:
     static char key_[20];
 
     const char *firmware{"1.42"};
-    const uint8_t broadcastMAC[6]{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     uint8_t maxNumberOfAttempts_{3};
     uint8_t maxWaitingTimeBetweenTransmissions_{5};
     uint8_t numberOfAttemptsToSend{1};
