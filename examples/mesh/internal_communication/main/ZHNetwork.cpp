@@ -61,7 +61,7 @@ error_code_t ZHNetwork::begin(const char *netName, const bool gateway)
 #if defined(ESP32)
     // randomSeed(esp_random());
 #endif
-    if (strlen(netName) >= 1 && strlen(netName) <= 20)
+    if (strlen(netName) >= 1 && strlen(netName) <= NET_NAME_SIZE)
         strcpy(netName_, netName);
 #ifdef PRINT_LOG
     // Serial.begin(115200);
@@ -102,7 +102,8 @@ void ZHNetwork::maintenance()
 #ifdef PRINT_LOG
             ESP_LOGI(TAG, "OK.");
 #endif
-            outgoing_data_t outgoingData = queueForOutgoingData.front();
+            outgoing_data_elem outgoingDataElem = std::move(queueForOutgoingData.front());
+            outgoing_data_t &outgoingData = *outgoingDataElem;
             queueForOutgoingData.pop();
 #if defined(ESP32)
             esp_now_del_peer(outgoingData.intermediateTargetMAC);
@@ -127,7 +128,8 @@ void ZHNetwork::maintenance()
                 ++numberOfAttemptsToSend;
             else
             {
-                outgoing_data_t outgoingData = queueForOutgoingData.front();
+                outgoing_data_elem outgoingDataElem = std::move(queueForOutgoingData.front());
+                outgoing_data_t &outgoingData = *outgoingDataElem;
                 queueForOutgoingData.pop();
 #if defined(ESP32)
                 esp_now_del_peer(outgoingData.intermediateTargetMAC);
@@ -157,16 +159,16 @@ void ZHNetwork::maintenance()
     }
     if (!queueForOutgoingData.empty() && ((pdTICKS_TO_MS(xTaskGetTickCount()) - lastMessageSentTime) > maxWaitingTimeBetweenTransmissions_))
     {
-        outgoing_data_t outgoingData = queueForOutgoingData.front();
+        outgoing_data_elem &outgoingData = queueForOutgoingData.front();
 #if defined(ESP32)
         esp_now_peer_info_t peerInfo;
         memset(&peerInfo, 0, sizeof(peerInfo));
-        memcpy(peerInfo.peer_addr, outgoingData.intermediateTargetMAC, 6);
+        memcpy(peerInfo.peer_addr, outgoingData->intermediateTargetMAC, 6);
         peerInfo.channel = 1;
         peerInfo.encrypt = false;
         esp_now_add_peer(&peerInfo);
 #endif
-        esp_now_send(outgoingData.intermediateTargetMAC, (uint8_t *)&outgoingData.transmittedData, sizeof(transmitted_data_t));
+        esp_now_send(outgoingData->intermediateTargetMAC, (uint8_t *)&outgoingData->transmittedData, sizeof(transmitted_data_t));
         lastMessageSentTime = pdTICKS_TO_MS(xTaskGetTickCount());
         sentMessageSemaphore = true;
 #ifdef PRINT_LOG
@@ -332,11 +334,15 @@ void ZHNetwork::maintenance()
         }
         if (forward)
         {
-            outgoing_data_t outgoingData;
-            memcpy(&outgoingData.transmittedData, &incomingData.transmittedData, sizeof(transmitted_data_t));
-            memcpy(&outgoingData.intermediateTargetMAC, &broadcastMAC, 6);
-            queueForOutgoingData.push(outgoingData);
-            vTaskDelay(pdMS_TO_TICKS(random(10)));
+            outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>();
+            if (outgoingData == nullptr) {
+                ESP_LOGW(TAG, "Drop packet, pool empty");
+            } else {
+                memcpy(&outgoingData->transmittedData, &incomingData.transmittedData, sizeof(transmitted_data_t));
+                memcpy(&outgoingData->intermediateTargetMAC, &broadcastMAC, 6);
+                queueForOutgoingData.push(std::move(outgoingData));
+                //vTaskDelay(pdMS_TO_TICKS(random(10)));
+            }
         }
         if (routingUpdate)
         {
@@ -385,16 +391,20 @@ void ZHNetwork::maintenance()
             if (detail::compare_mac(routingTable.originalTargetMAC, waitingData.transmittedData.originalTargetMAC))
             {
                 queueForRoutingVectorWaiting.pop();
-                outgoing_data_t outgoingData;
-                memcpy(&outgoingData.transmittedData, &waitingData.transmittedData, sizeof(transmitted_data_t));
-                memcpy(&outgoingData.intermediateTargetMAC, &routingTable.intermediateTargetMAC, 6);
-                queueForOutgoingData.push(outgoingData);
+                outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>();
+                if (outgoingData == nullptr) {
+                    ESP_LOGW(TAG, "Droping waiting for routing vector msg pool empty");
+                } else {
+                    memcpy(&outgoingData->transmittedData, &waitingData.transmittedData, sizeof(transmitted_data_t));
+                    memcpy(&outgoingData->intermediateTargetMAC, &routingTable.intermediateTargetMAC, 6);
+                    queueForOutgoingData.push(std::move(outgoingData));
 #ifdef PRINT_LOG
-                ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s found. Target is %s.",
-                        macToString(outgoingData.transmittedData.originalTargetMAC).c_str(),
-                        macToString(outgoingData.intermediateTargetMAC).c_str());
+                    ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s found. Target is %s.",
+                            macToString(outgoingData.transmittedData.originalTargetMAC).c_str(),
+                            macToString(outgoingData.intermediateTargetMAC).c_str());
 #endif
-                return;
+                    return;
+                }
             }
         }
         if ((pdTICKS_TO_MS(xTaskGetTickCount()) - waitingData.time) > maxTimeForRoutingInfoWaiting_)
@@ -581,24 +591,29 @@ void IRAM_ATTR ZHNetwork::onDataReceive(const esp_now_recv_info_t *mac, const ui
 
 uint16_t ZHNetwork::broadcastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, message_type_t type)
 {
-    outgoing_data_t outgoingData;
-    outgoingData.transmittedData.messageType = type;
-    outgoingData.transmittedData.messageID = ((uint16_t)random(32767) << 8) | (uint16_t)random(32767);
-    memcpy(&outgoingData.transmittedData.netName, &netName_, 20);
-    memcpy(&outgoingData.transmittedData.originalTargetMAC, target, 6);
-    memcpy(&outgoingData.transmittedData.originalSenderMAC, &localMAC, 6);
-    outgoingData.transmittedData.messageSize = size;
-    if (size > sizeof(outgoingData.transmittedData.message))
+    outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>();
+    if (outgoingData == nullptr) {
+        ESP_LOGW(TAG, "Broadcase failed because of empty pool");
+        return ERROR;
+    }
+    outgoingData->transmittedData.messageType = type;
+    outgoingData->transmittedData.messageID = ((uint16_t)random(32767) << 8) | (uint16_t)random(32767);
+    memcpy(&outgoingData->transmittedData.netName, &netName_, NET_NAME_SIZE);
+    memcpy(&outgoingData->transmittedData.originalTargetMAC, target, 6);
+    memcpy(&outgoingData->transmittedData.originalSenderMAC, &localMAC, 6);
+    outgoingData->transmittedData.messageSize = size;
+    if (size > sizeof(outgoingData->transmittedData.message))
         return ESP_ERR_INVALID_SIZE;
-    memcpy(outgoingData.transmittedData.message, data, size);
-    if (key_[0] && outgoingData.transmittedData.messageType == BROADCAST)
-        for (uint8_t i{0}; i < outgoingData.transmittedData.messageSize; ++i)
-            outgoingData.transmittedData.message[i] = outgoingData.transmittedData.message[i] ^ key_[i % strlen(key_)];
-    memcpy(&outgoingData.intermediateTargetMAC, &broadcastMAC, 6);
-    queueForOutgoingData.push(outgoingData);
+    memcpy(outgoingData->transmittedData.message, data, size);
+    if (key_[0] && outgoingData->transmittedData.messageType == BROADCAST)
+        for (uint8_t i{0}; i < outgoingData->transmittedData.messageSize; ++i)
+            outgoingData->transmittedData.message[i] = outgoingData->transmittedData.message[i] ^ key_[i % strlen(key_)];
+    memcpy(&outgoingData->intermediateTargetMAC, &broadcastMAC, 6);
+    outgoing_data_t &res = *outgoingData; // For print log and return res.
+    queueForOutgoingData.push(std::move(outgoingData));
 #ifdef PRINT_LOG
     std::string messageType;
-    switch (outgoingData.transmittedData.messageType)
+    switch (res.transmittedData.messageType)
     {
     case BROADCAST:
         messageType = "BROADCAST";
@@ -614,18 +629,23 @@ uint16_t ZHNetwork::broadcastMessage(const uint8_t *data, uint8_t size, const ui
     }
     ESP_LOGI(TAG, "%s message from MAC %s to MAC %s added to queue.",
             messageType.c_str(),
-            macToString(outgoingData.transmittedData.originalSenderMAC).c_str(),
-            macToString(outgoingData.transmittedData.originalTargetMAC).c_str());
+            macToString(res.transmittedData.originalSenderMAC).c_str(),
+            macToString(res.transmittedData.originalTargetMAC).c_str());
 #endif
-    return outgoingData.transmittedData.messageID;
+    return res.transmittedData.messageID;
 }
 
 uint16_t ZHNetwork::unicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const uint8_t *sender, message_type_t type)
 {
-    outgoing_data_t outgoingData;
+    outgoing_data_elem outgoingDataElem = pool_.take<outgoing_data_t>();
+    if (outgoingDataElem == nullptr) {
+        ESP_LOGW(TAG, "Failed to send unicast pool empty");
+        return ERROR;
+    }
+    outgoing_data_t &outgoingData = *outgoingDataElem;
     outgoingData.transmittedData.messageType = type;
     outgoingData.transmittedData.messageID = ((uint16_t)random(32767) << 8) | (uint16_t)random(32767);
-    memcpy(&outgoingData.transmittedData.netName, &netName_, 20);
+    memcpy(&outgoingData.transmittedData.netName, &netName_, NET_NAME_SIZE);
     memcpy(&outgoingData.transmittedData.originalTargetMAC, target, 6);
     memcpy(&outgoingData.transmittedData.originalSenderMAC, sender, 6);
     outgoingData.transmittedData.messageSize = size;
@@ -641,7 +661,7 @@ uint16_t ZHNetwork::unicastMessage(const uint8_t *data, uint8_t size, const uint
         if (memcmp(routingTable.originalTargetMAC, target, sizeof(routingTable.originalTargetMAC)) == 0)
         {
             memcpy(&outgoingData.intermediateTargetMAC, &routingTable.intermediateTargetMAC, 6);
-            queueForOutgoingData.push(outgoingData);
+            queueForOutgoingData.push(std::move(outgoingDataElem));
 #ifdef PRINT_LOG
             ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s found. Target is %s.",
                     macToString(outgoingData.transmittedData.originalTargetMAC).c_str(),
@@ -671,8 +691,8 @@ uint16_t ZHNetwork::unicastMessage(const uint8_t *data, uint8_t size, const uint
         }
     }
     memcpy(&outgoingData.intermediateTargetMAC, target, 6);
-    ESP_LOGI(TAG, "queueForOutgoingData.size() = %d", queueForOutgoingData.size());
-    queueForOutgoingData.push(outgoingData);
+    // ESP_LOGI(TAG, "queueForOutgoingData.size() = %d", queueForOutgoingData.size());
+    queueForOutgoingData.push(std::move(outgoingDataElem));
 #ifdef PRINT_LOG
     ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s not found. Target is %s.",
             macToString(outgoingData.transmittedData.originalTargetMAC).c_str(),

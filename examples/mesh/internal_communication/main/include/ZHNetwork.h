@@ -3,6 +3,7 @@
 #define ESP32
 // #include "Arduino.h"
 #include <queue>
+#include <list>
 #include "stdint.h"
 #include <functional>
 #include <string>
@@ -16,6 +17,8 @@
 #include "esp_wifi.h"
 #include "esp_now.h"
 #endif
+
+#include <memory_pool.hpp>
 
 // #define PRINT_LOG // Uncomment to display to serial port the full operation log.
 
@@ -89,11 +92,17 @@ typedef enum // Just for further development.
     ERROR = 0
 } error_code_t;
 
+using outgoing_data_elem = DefPool::uptr<outgoing_data_t>;
+using incoming_data_elem = DefPool::uptr<incoming_data_t>;
+using waiting_data_elem = DefPool::uptr<waiting_data_t>;
+
 typedef std::function<void(const uint8_t *, uint8_t, const uint8_t *)> on_message_t;
 typedef std::function<void(const uint8_t *, const uint16_t, const bool)> on_confirm_t;
 typedef std::vector<routing_table_t> routing_vector_t;
 typedef std::vector<confirmation_waiting_data_t> confirmation_vector_t;
-typedef std::queue<outgoing_data_t> outgoing_queue_t;
+typedef std::queue<outgoing_data_elem, std::list<outgoing_data_elem>> outgoing_queue_t;
+//typedef std::queue<incoming_data_elem, std::list<incoming_data_elem>> incoming_queue_t;
+//typedef std::queue<waiting_data_elem, std::list<waiting_data_elem>> waiting_queue_t;
 typedef std::queue<incoming_data_t> incoming_queue_t;
 typedef std::queue<waiting_data_t> waiting_queue_t;
 
@@ -139,7 +148,7 @@ private:
     static bool confirmReceiving;
     static uint8_t localMAC[6];
     static uint16_t lastMessageID[10];
-    static char netName_[20];
+    static char netName_[NET_NAME_SIZE];
     static char key_[20];
 
     const char *firmware{"1.42"};
@@ -149,6 +158,7 @@ private:
     uint8_t numberOfAttemptsToSend{1};
     uint16_t maxTimeForRoutingInfoWaiting_{500};
     uint32_t lastMessageSentTime{0};
+    DefPool &pool_ = DefPool::get_pool();
 
 #if defined(ESP8266)
     static void onDataSent(uint8_t *mac, uint8_t status);
