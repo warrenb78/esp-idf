@@ -147,13 +147,18 @@ void ZHNetwork::maintenance()
 #endif
                     }
                 }
-                waiting_data_t waitingData;
-                waitingData.time = pdTICKS_TO_MS(xTaskGetTickCount());
-                memcpy(&waitingData.intermediateTargetMAC, &outgoingData.intermediateTargetMAC, 6);
-                memcpy(&waitingData.transmittedData, &outgoingData.transmittedData, sizeof(transmitted_data_t));
-                queueForRoutingVectorWaiting.push(waitingData);
-                uint8_t empty{};
-                broadcastMessage(&empty, 0, outgoingData.transmittedData.originalTargetMAC, SEARCH_REQUEST);
+                waiting_data_elem waitingDataElem = pool_.take<waiting_data_t>();
+                if (waitingDataElem == nullptr) {
+                    ESP_LOGW(TAG, "Drop waiting route table because pool is empty");
+                } else {
+                    waiting_data_t &waitingData = *waitingDataElem;
+                    waitingData.time = pdTICKS_TO_MS(xTaskGetTickCount());
+                    memcpy(&waitingData.intermediateTargetMAC, &outgoingData.intermediateTargetMAC, 6);
+                    memcpy(&waitingData.transmittedData, &outgoingData.transmittedData, sizeof(transmitted_data_t));
+                    queueForRoutingVectorWaiting.push(std::move(waitingDataElem));
+                    uint8_t empty{};
+                    broadcastMessage(&empty, 0, outgoingData.transmittedData.originalTargetMAC, SEARCH_REQUEST);
+                }
             }
         }
     }
@@ -206,11 +211,16 @@ void ZHNetwork::maintenance()
     if (!queueForIncomingData.empty())
     {
         criticalProcessSemaphore = true;
-        incoming_data_t incomingData = queueForIncomingData.front();
+        incoming_data_elem incomingDataElem = std::move(queueForIncomingData.front());
         queueForIncomingData.pop();
+        if (incomingDataElem == nullptr)
+            abort();
+        incoming_data_t &incomingData = *incomingDataElem;
         criticalProcessSemaphore = false;
         bool forward{false};
         bool routingUpdate{false};
+        // ESP_LOGI(TAG, "got %u %p " MACSTR " " MACSTR, incomingData.transmittedData.messageType, incomingDataElem.get(),
+        //         MAC2STR(incomingData.transmittedData.originalTargetMAC), MAC2STR(localMAC));
         switch (incomingData.transmittedData.messageType)
         {
         case BROADCAST:
@@ -384,31 +394,37 @@ void ZHNetwork::maintenance()
     }
     if (!queueForRoutingVectorWaiting.empty())
     {
-        waiting_data_t waitingData = queueForRoutingVectorWaiting.front();
+        // Taking reference to unique_ptr, handle it carefully.
+        waiting_data_elem &waitingDataElemRef = queueForRoutingVectorWaiting.front();
+        waiting_data_elem waitingDataElem; // Init to null will take ownership later.
+        waiting_data_t &waitingData = *waitingDataElemRef;
         for (uint16_t i{0}; i < routingVector.size(); ++i)
         {
             routing_table_t routingTable = routingVector[i];
             if (detail::compare_mac(routingTable.originalTargetMAC, waitingData.transmittedData.originalTargetMAC))
             {
+                waitingDataElem = std::move(waitingDataElemRef);
                 queueForRoutingVectorWaiting.pop();
                 outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>();
                 if (outgoingData == nullptr) {
                     ESP_LOGW(TAG, "Droping waiting for routing vector msg pool empty");
-                } else {
-                    memcpy(&outgoingData->transmittedData, &waitingData.transmittedData, sizeof(transmitted_data_t));
-                    memcpy(&outgoingData->intermediateTargetMAC, &routingTable.intermediateTargetMAC, 6);
-                    queueForOutgoingData.push(std::move(outgoingData));
+                    return;
+                }
+
+                memcpy(&outgoingData->transmittedData, &waitingData.transmittedData, sizeof(transmitted_data_t));
+                memcpy(&outgoingData->intermediateTargetMAC, &routingTable.intermediateTargetMAC, 6);
+                queueForOutgoingData.push(std::move(outgoingData));
 #ifdef PRINT_LOG
                     ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s found. Target is %s.",
                             macToString(outgoingData.transmittedData.originalTargetMAC).c_str(),
                             macToString(outgoingData.intermediateTargetMAC).c_str());
 #endif
-                    return;
-                }
+                return;
             }
         }
         if ((pdTICKS_TO_MS(xTaskGetTickCount()) - waitingData.time) > maxTimeForRoutingInfoWaiting_)
         {
+            waitingDataElem = std::move(waitingDataElemRef);
             queueForRoutingVectorWaiting.pop();
 #ifdef PRINT_LOG
             ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s not found.",
@@ -560,7 +576,12 @@ void IRAM_ATTR ZHNetwork::onDataReceive(const esp_now_recv_info_t *mac, const ui
         criticalProcessSemaphore = false;
         return;
     }
-    incoming_data_t incomingData;
+    incoming_data_elem incomingDataElem = DefPool::get_pool().take<incoming_data_t>();
+    if (incomingDataElem == nullptr) {
+        ESP_LOGE(TAG, "Failed to receive packet from wire level pool empty len %u", length);
+        return;
+    }
+    incoming_data_t &incomingData = *incomingDataElem;
     memcpy(&incomingData.transmittedData, data, sizeof(transmitted_data_t));
     if (detail::compare_mac(incomingData.transmittedData.originalSenderMAC, localMAC))
     {
@@ -585,7 +606,7 @@ void IRAM_ATTR ZHNetwork::onDataReceive(const esp_now_recv_info_t *mac, const ui
         lastMessageID[i] = lastMessageID[i - 1];
     lastMessageID[0] = incomingData.transmittedData.messageID;
     memcpy(&incomingData.intermediateSenderMAC, mac, 6);
-    queueForIncomingData.push(incomingData);
+    queueForIncomingData.push(std::move(incomingDataElem));
     criticalProcessSemaphore = false;
 }
 

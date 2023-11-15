@@ -14,8 +14,8 @@ ZHNetwork network;
 extern QueueSender g_sender;
 static esp_netif_t *netif_sta = NULL;
 
-uint8_t buf[255];
-uint8_t mac[6];
+static uint8_t buf[255];
+static uint8_t mac[6];
 
 void zh_task(void *arg)
 {
@@ -25,9 +25,16 @@ void zh_task(void *arg)
         TickType_t end_maintenance = xTaskGetTickCount();
         uint8_t bytes = g_sender.receive(buf, sizeof(buf), mac);
         TickType_t found_bytes = xTaskGetTickCount();
+
+        constexpr static uint8_t BROADCAST[6]{0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
         // ESP_LOGI(TAG, "found %d bytes to send", bytes);
         if (bytes != 0) {
-            network.sendUnicastMessage(buf, bytes, mac);
+            bool confirm = false;
+            if (memcmp(mac, BROADCAST, sizeof(BROADCAST)) == 0) {
+                network.sendBroadcastMessage(buf, bytes);
+            } else {
+                network.sendUnicastMessage(buf, bytes, mac, confirm);
+            }
         }
         // if (bytes == 0) {
         //     // ESP_LOGI(TAG, "are you sleeping?!");

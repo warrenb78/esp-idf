@@ -7,6 +7,8 @@
 #include <array>
 #include <cstdint>
 
+#include "mutex.hpp"
+
 // 1 mbit/s / 255 KB per message ~ 500 message / s
 constexpr static size_t MAX_NUMBER_OF_MESSAGE = 500;
 constexpr static size_t MAX_MESSAGE_SIZE = 261; // 255 for transmit + 6 for metadata
@@ -53,6 +55,7 @@ private:
         static_assert(sizeof(T) < item_type().size(), "Tried to take too large message");
         if (_size == 0) // empty pool.
             return nullptr;
+        unique_lock guard(_mutex);
         auto ref = std::move(_pool[_tail]);
         if (ref == nullptr)
             abort(); // Programming error cond
@@ -65,6 +68,7 @@ private:
     void _give(T *ptr) {
         if (_size >= PoolSize || _pool[_head] != nullptr)
             abort();
+        unique_lock guard(_mutex);
         _pool[_head].reset(reinterpret_cast<item_type *>(ptr));
         _head = _next_index(_head);
         ++_size;
@@ -78,6 +82,7 @@ private:
     size_t _size = PoolSize;
     size_t _head = 0;
     size_t _tail = 0;
+    mutex _mutex;
 };
 
 using DefPool = Pool<MAX_NUMBER_OF_MESSAGE>;

@@ -101,10 +101,8 @@ typedef std::function<void(const uint8_t *, const uint16_t, const bool)> on_conf
 typedef std::vector<routing_table_t> routing_vector_t;
 typedef std::vector<confirmation_waiting_data_t> confirmation_vector_t;
 typedef std::queue<outgoing_data_elem, std::list<outgoing_data_elem>> outgoing_queue_t;
-//typedef std::queue<incoming_data_elem, std::list<incoming_data_elem>> incoming_queue_t;
-//typedef std::queue<waiting_data_elem, std::list<waiting_data_elem>> waiting_queue_t;
-typedef std::queue<incoming_data_t> incoming_queue_t;
-typedef std::queue<waiting_data_t> waiting_queue_t;
+typedef std::queue<incoming_data_elem, std::list<incoming_data_elem>> incoming_queue_t;
+typedef std::queue<waiting_data_elem, std::list<waiting_data_elem>> waiting_queue_t;
 
 class ZHNetwork
 {
