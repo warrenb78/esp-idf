@@ -53,9 +53,9 @@ private:
     template <typename T, class = std::enable_if_t<is_pod_v<T>>>
     T *_take() {
         static_assert(sizeof(T) < item_type().size(), "Tried to take too large message");
+        unique_lock guard(_mutex);
         if (_size == 0) // empty pool.
             return nullptr;
-        unique_lock guard(_mutex);
         auto ref = std::move(_pool[_tail]);
         if (ref == nullptr)
             abort(); // Programming error cond
@@ -66,9 +66,9 @@ private:
 
     template <typename T>
     void _give(T *ptr) {
+        unique_lock guard(_mutex);
         if (_size >= PoolSize || _pool[_head] != nullptr)
             abort();
-        unique_lock guard(_mutex);
         _pool[_head].reset(reinterpret_cast<item_type *>(ptr));
         _head = _next_index(_head);
         ++_size;

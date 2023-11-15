@@ -1,6 +1,7 @@
 #include <atomic>
 #include <map>
 #include <unordered_map>
+#include <ranges>
 
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -14,11 +15,13 @@
 #include "uart_commander.hpp"
 #include "mutex.hpp"
 
+#include "ZHNetwork.h"
+
 static const char *TAG = "command";
 #if defined(USE_ZHNETWORK)
 const start_keep_alive_data BASIC_KEEP_ALIVE {
     .reset_index = my_bool::TRUE,
-    .delay_ms = 500, // 2 Hz,
+    .delay_ms = 1000, // 2 Hz,
     .send_to_root = my_bool::FALSE,
     .payload_size = 0,
     .target_mac{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
@@ -148,6 +151,10 @@ public:
         // C++11 singeltons.
         static statistics state;
         return state;
+    }
+
+    size_t size() {
+        return _info.size();
     }
 
     auto begin() {
@@ -336,8 +343,8 @@ void handle_keep_alive(const mesh_addr_t *from, const message_t *message, size_t
 #if 1
     const char *message_name = "keep_alive";
     ESP_LOGI(TAG,
-            "message %s from:" MACSTR "[%u] parent: " MACSTR " , id %lu timestamp %llu ms, rssi %lld",
-            message_name, MAC2STR(from->addr), keep_alive.layer, MAC2STR(keep_alive.parent_mac),
+            "message %s from:" MACSTR ", id %4lu timestamp %llu ms, rssi %lld",
+            message_name, MAC2STR(from->addr),
             keep_alive.message_index, keep_alive.timestamp, keep_alive.rssi);
 #endif
 }
@@ -351,16 +358,16 @@ void handle_get_nodes()
         .get_nodes_reply{},
     };
     auto &get_nodes_reply = nodes_reply.get_nodes_reply;
-    int num_nodes = 0;
-    int err = esp_mesh_get_routing_table(
-        get_nodes_reply.nodes, sizeof(get_nodes_reply.nodes), &num_nodes);
-    if (err) {
-        ESP_LOGE(TAG, "Failed get routing table %d", err);
-        get_nodes_reply.num_nodes = 0;
-    } else {
-        get_nodes_reply.num_nodes = static_cast<uint8_t>(num_nodes);
-    }
 
+    statistics &state = statistics::get_state();
+    {
+        auto guard = state.lock();
+        get_nodes_reply.num_nodes = static_cast<uint8_t>(state.size()+1);
+        for (auto const& [index, route] : std::views::enumerate(std::views::keys(state))) {
+            memcpy(get_nodes_reply.nodes[index+1].addr, route.addr, 6);
+        }
+        memcpy(get_nodes_reply.nodes[0].addr, ZHNetwork::localMAC, 6);
+    }
     send_uart_bytes((uint8_t *)&nodes_reply, sizeof(get_nodes_reply) + header_size);
 }
 

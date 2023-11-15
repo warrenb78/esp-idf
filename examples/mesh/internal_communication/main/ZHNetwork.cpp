@@ -7,7 +7,7 @@
 #include "esp_log.h"
 
 #define TAG "ZHNetwork"
-#define PRINT_LOG
+// #define PRINT_LOG
 
 #define MAX_LAYERS 5
 
@@ -164,7 +164,7 @@ void ZHNetwork::maintenance()
             }
         }
     }
-    if (!queueForOutgoingData.empty() && ((pdTICKS_TO_MS(xTaskGetTickCount()) - lastMessageSentTime) > maxWaitingTimeBetweenTransmissions_))
+    if (!queueForOutgoingData.empty() && !sentMessageSemaphore)
     {
         outgoing_data_elem &outgoingData = queueForOutgoingData.front();
 #if defined(ESP32)
@@ -180,7 +180,7 @@ void ZHNetwork::maintenance()
         sentMessageSemaphore = true;
 #ifdef PRINT_LOG
         std::string messageType;
-        switch (outgoingData.transmittedData.messageType)
+        switch (outgoingData->transmittedData.messageType)
         {
         case BROADCAST:
             messageType = "BROADCAST";
@@ -205,9 +205,9 @@ void ZHNetwork::maintenance()
         }
         ESP_LOGI(TAG, "%s message from MAC %s to MAC %s via MAC %s sended. Status ",
                 messageType.c_str(),
-                macToString(outgoingData.transmittedData.originalSenderMAC).c_str(), 
-                macToString(outgoingData.transmittedData.originalTargetMAC).c_str(),
-                macToString(outgoingData.intermediateTargetMAC).c_str());
+                macToString(outgoingData->transmittedData.originalSenderMAC).c_str(), 
+                macToString(outgoingData->transmittedData.originalTargetMAC).c_str(),
+                macToString(outgoingData->intermediateTargetMAC).c_str());
 #endif
     }
     if (!queueForIncomingData.empty())
@@ -346,7 +346,7 @@ void ZHNetwork::maintenance()
                     macToString(incomingData.transmittedData.originalSenderMAC).c_str(),
                     macToString(incomingData.transmittedData.originalTargetMAC).c_str());
 #endif
-            if (!detail::compare_mac(incomingData.transmittedData.originalTargetMAC, localMAC))
+            if (!detail::compare_mac(incomingData.transmittedData.originalTargetMAC, localMAC)) {
                 if(incomingData.transmittedData.ttl) {
                     incomingData.transmittedData.ttl--;
                     forward = true;
@@ -427,12 +427,12 @@ void ZHNetwork::maintenance()
 
                 memcpy(&outgoingData->transmittedData, &waitingData.transmittedData, sizeof(transmitted_data_t));
                 memcpy(&outgoingData->intermediateTargetMAC, &routingTable.intermediateTargetMAC, 6);
-                queueForOutgoingData.push(std::move(outgoingData));
 #ifdef PRINT_LOG
                     ESP_LOGI(TAG, "CHECKING ROUTING TABLE... Routing to MAC %s found. Target is %s.",
-                            macToString(outgoingData.transmittedData.originalTargetMAC).c_str(),
-                            macToString(outgoingData.intermediateTargetMAC).c_str());
+                            macToString(outgoingData->transmittedData.originalTargetMAC).c_str(),
+                            macToString(outgoingData->intermediateTargetMAC).c_str());
 #endif
+                queueForOutgoingData.push(std::move(outgoingData));
                 return;
             }
         }
@@ -568,7 +568,7 @@ uint16_t ZHNetwork::getMaxWaitingTimeForRoutingInfo()
 void IRAM_ATTR ZHNetwork::onDataSent(uint8_t *mac, uint8_t status)
 #endif
 #if defined(ESP32)
-    void IRAM_ATTR ZHNetwork::onDataSent(const uint8_t *mac, esp_now_send_status_t status)
+void IRAM_ATTR ZHNetwork::onDataSent(const uint8_t *mac, esp_now_send_status_t status)
 #endif
 {
     confirmReceivingSemaphore = true;

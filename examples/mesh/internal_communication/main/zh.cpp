@@ -32,7 +32,7 @@ void zh_task(void *arg)
 }
 
 void on_zhrecv_message(const uint8_t *message, uint8_t size, const uint8_t *src_mac) {
-    ESP_LOGI(TAG, "Recv message from " MACSTR ", msg size %u", MAC2STR(src_mac), size);
+    // ESP_LOGI(TAG, "Recv message from " MACSTR ", msg size %u", MAC2STR(src_mac), size);
     handle_message(reinterpret_cast<const mesh_addr_t *>(src_mac), message, size);
 }
 

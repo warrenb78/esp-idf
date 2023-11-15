@@ -208,7 +208,7 @@ class Commander:
 
         self._send_command(MessageType.FORWARD, forward)
 
-    def _send_start_keep_alive(self, dst, reset_index, delay_ms, payload_size, send_to_root=True, target_mac=(0,0,0,0,0,0)):
+    def _send_start_keep_alive(self, dst, reset_index, delay_ms, payload_size, send_to_root=False, target_mac=(0xff,0xff,0xff,0xff,0xff,0xff)):
         start_keep_alive = Struct(
             "reset_index" / Byte,
             "delay_ms" / Int32ul,
@@ -275,8 +275,6 @@ class Commander:
         tree = dict()
         nodes = dict()
         for node_info in itertools.islice(res.nodes, res.num_nodes):
-            # Add 1 to the last number for sta vs ap mac
-            node_info.mac[5] = node_info.mac[5] + 1
             # add to parent
             tree.setdefault(tuple(node_info.parent_mac), []).append(tuple(node_info.mac))
             # init empty for leafs
@@ -323,11 +321,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('-l', '--log-path', help='Path to text loger', default='mesh.log')
     return parser
-
-def foo(x):
-    t = threading.Timer(0.001, lambda: foo(x+1))
-    print(x)
-    t.start()
 
 def run_transmission_info(commander, seconds):
     def foo(seconds_left):

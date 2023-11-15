@@ -135,6 +135,7 @@ public:
     uint16_t getMaxWaitingTimeForRoutingInfo(void);
 
     static constexpr uint8_t broadcastMAC[6]{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    static uint8_t localMAC[6];
 private:
     static routing_vector_t routingVector;
     static confirmation_vector_t confirmationVector;
@@ -146,7 +147,6 @@ private:
     static bool sentMessageSemaphore;
     static bool confirmReceivingSemaphore;
     static bool confirmReceiving;
-    static uint8_t localMAC[6];
     static uint16_t lastMessageID[10];
     static char netName_[NET_NAME_SIZE];
     static char key_[20];
