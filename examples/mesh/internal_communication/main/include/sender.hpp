@@ -6,6 +6,7 @@
 #include <esp_mesh.h>
 #include <esp_mac.h>
 #include "esp_log.h"
+#include <FreeRTOS/message_buffer.h>
 
 #include "ZHNetwork.h"
 
