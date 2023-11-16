@@ -83,14 +83,14 @@ error_code_t ZHNetwork::begin(const char *netName, const bool gateway)
     return SUCCESS;
 }
 
-uint16_t ZHNetwork::sendBroadcastMessage(const uint8_t *data, uint8_t size)
+uint16_t ZHNetwork::sendBroadcastMessage(const uint8_t *data, uint8_t size, bool important)
 {
-    return broadcastMessage(data, size, broadcastMAC, BROADCAST);
+    return broadcastMessage(data, size, broadcastMAC, BROADCAST, important);
 }
 
-uint16_t ZHNetwork::sendUnicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const bool confirm)
+uint16_t ZHNetwork::sendUnicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const bool confirm, bool important)
 {
-    return unicastMessage(data, size, target, localMAC, confirm ? UNICAST_WITH_CONFIRM : UNICAST);
+    return unicastMessage(data, size, target, localMAC, confirm ? UNICAST_WITH_CONFIRM : UNICAST, important);
 }
 
 void ZHNetwork::maintenance()
@@ -149,7 +149,7 @@ void ZHNetwork::maintenance()
 #endif
                     }
                 }
-                waiting_data_elem waitingDataElem = pool_.take<waiting_data_t>();
+                waiting_data_elem waitingDataElem = pool_.take<waiting_data_t>(outgoingData.transmittedData.important);
                 if (waitingDataElem == nullptr) {
                     ESP_LOGW(TAG, "Drop waiting route table because pool is empty");
                 } else {
@@ -175,6 +175,9 @@ void ZHNetwork::maintenance()
         peerInfo.encrypt = false;
         esp_now_add_peer(&peerInfo);
 #endif
+        if(outgoingData->transmittedData.important)
+            ESP_LOGE(TAG, "\n\n***************************** IMPORTANT ID - %d ************************\n\n",
+                    outgoingData->transmittedData.messageID);
         esp_now_send(outgoingData->intermediateTargetMAC, (uint8_t *)&outgoingData->transmittedData, sizeof(transmitted_data_t));
         lastMessageSentTime = pdTICKS_TO_MS(xTaskGetTickCount());
         sentMessageSemaphore = true;
@@ -239,7 +242,7 @@ void ZHNetwork::maintenance()
                 onBroadcastReceivingCallback(incomingData.transmittedData.message, incomingData.transmittedData.messageSize,
                                              incomingData.transmittedData.originalSenderMAC);
             }
-            if(incomingData.transmittedData.ttl) {
+            if(incomingData.transmittedData.ttl != 0 && incomingData.transmittedData.ttl < MAX_LAYERS) {
                 incomingData.transmittedData.ttl--;
                 forward = true;
             }
@@ -264,8 +267,11 @@ void ZHNetwork::maintenance()
                 }
             }
             else {
-                auto &transmittedData = incomingData.transmittedData;
-                unicastMessage(transmittedData.message, transmittedData.messageSize, transmittedData.originalTargetMAC, transmittedData.originalSenderMAC, UNICAST);
+                if(incomingData.transmittedData.ttl != 0 && incomingData.transmittedData.ttl < MAX_LAYERS) {
+                    incomingData.transmittedData.ttl--;
+                    auto &transmittedData = incomingData.transmittedData;
+                    unicastMessage(transmittedData.message, transmittedData.messageSize, transmittedData.originalTargetMAC, transmittedData.originalSenderMAC, UNICAST);
+                }
             }
             break;
         case UNICAST_WITH_CONFIRM:
@@ -292,8 +298,11 @@ void ZHNetwork::maintenance()
                 unicastMessage(temp, sizeof(id), incomingData.transmittedData.originalSenderMAC, localMAC, DELIVERY_CONFIRM_RESPONSE);
             }
             else {
-                auto &transmittedData = incomingData.transmittedData;
-                unicastMessage(transmittedData.message, transmittedData.messageSize, transmittedData.originalTargetMAC, transmittedData.originalSenderMAC, UNICAST_WITH_CONFIRM);
+                if(incomingData.transmittedData.ttl != 0 && incomingData.transmittedData.ttl < MAX_LAYERS) {
+                    incomingData.transmittedData.ttl--;
+                    auto &transmittedData = incomingData.transmittedData;
+                    unicastMessage(transmittedData.message, transmittedData.messageSize, transmittedData.originalTargetMAC, transmittedData.originalSenderMAC, UNICAST_WITH_CONFIRM);
+                }
             }
             break;
         case DELIVERY_CONFIRM_RESPONSE:
@@ -319,8 +328,11 @@ void ZHNetwork::maintenance()
                 }
             }
             else {
-                auto &transmittedData = incomingData.transmittedData;
-                unicastMessage(transmittedData.message, transmittedData.messageSize, transmittedData.originalTargetMAC, transmittedData.originalSenderMAC, DELIVERY_CONFIRM_RESPONSE);
+                if(incomingData.transmittedData.ttl != 0 && incomingData.transmittedData.ttl < MAX_LAYERS) {
+                    incomingData.transmittedData.ttl--;
+                    auto &transmittedData = incomingData.transmittedData;
+                    unicastMessage(transmittedData.message, transmittedData.messageSize, transmittedData.originalTargetMAC, transmittedData.originalSenderMAC, DELIVERY_CONFIRM_RESPONSE);
+                }
             }
             break;
         case SEARCH_REQUEST:
@@ -333,7 +345,7 @@ void ZHNetwork::maintenance()
                 uint8_t empty{};
                 broadcastMessage(&empty, 0, incomingData.transmittedData.originalSenderMAC, SEARCH_RESPONSE);
             } else {
-                if(incomingData.transmittedData.ttl) {
+                if(incomingData.transmittedData.ttl != 0 && incomingData.transmittedData.ttl < MAX_LAYERS) {
                     incomingData.transmittedData.ttl--;
                     forward = true;
                 }
@@ -347,7 +359,7 @@ void ZHNetwork::maintenance()
                     macToString(incomingData.transmittedData.originalTargetMAC).c_str());
 #endif
             if (!detail::compare_mac(incomingData.transmittedData.originalTargetMAC, localMAC)) {
-                if(incomingData.transmittedData.ttl) {
+                if(incomingData.transmittedData.ttl != 0 && incomingData.transmittedData.ttl < MAX_LAYERS) {
                     incomingData.transmittedData.ttl--;
                     forward = true;
                 }
@@ -359,9 +371,9 @@ void ZHNetwork::maintenance()
         }
         if (forward)
         {
-            outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>();
+            outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>(incomingData.transmittedData.important);
             if (outgoingData == nullptr) {
-                ESP_LOGW(TAG, "Drop packet, pool empty");
+                ESP_LOGW(TAG, "Drop packet, pool empty. Important - %d", incomingData.transmittedData.important);
             } else {
                 memcpy(&outgoingData->transmittedData, &incomingData.transmittedData, sizeof(transmitted_data_t));
                 memcpy(&outgoingData->intermediateTargetMAC, &broadcastMAC, 6);
@@ -419,7 +431,7 @@ void ZHNetwork::maintenance()
             {
                 waitingDataElem = std::move(waitingDataElemRef);
                 queueForRoutingVectorWaiting.pop();
-                outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>();
+                outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>(waitingData.transmittedData.important);
                 if (outgoingData == nullptr) {
                     ESP_LOGW(TAG, "Droping waiting for routing vector msg pool empty");
                     return;
@@ -590,43 +602,49 @@ void IRAM_ATTR ZHNetwork::onDataReceive(const esp_now_recv_info_t *mac, const ui
         criticalProcessSemaphore = false;
         return;
     }
-    incoming_data_elem incomingDataElem = DefPool::get_pool().take<incoming_data_t>();
-    if (incomingDataElem == nullptr) {
-        ESP_LOGE(TAG, "Failed to receive packet from wire level pool empty len %u", length);
-        return;
-    }
-    incoming_data_t &incomingData = *incomingDataElem;
-    memcpy(&incomingData.transmittedData, data, sizeof(transmitted_data_t));
-    if (detail::compare_mac(incomingData.transmittedData.originalSenderMAC, localMAC))
+    const auto &transmittedData = *reinterpret_cast<const transmitted_data_t *>(data);
+    if (detail::compare_mac(transmittedData.originalSenderMAC, localMAC))
     {
         criticalProcessSemaphore = false;
         return;
     }
     if (netName_[0] != '\0')
     {
-        if (strncmp(incomingData.transmittedData.netName, netName_, sizeof(netName_)) != 0)
+        if (strncmp(transmittedData.netName, netName_, sizeof(netName_)) != 0)
         {
             criticalProcessSemaphore = false;
             return;
         }
     }
+    if (transmittedData.important)
+        ESP_LOGI(TAG, "\n\n************* ON_DATA_RECEIVE IMPORTANT!! " MACSTR " ID - %d *********8\n\n",
+                 MAC2STR(transmittedData.originalSenderMAC),
+                 transmittedData.messageID);
     for (uint8_t i{0}; i < sizeof(lastMessageID) / 2; ++i)
-        if (lastMessageID[i] == incomingData.transmittedData.messageID)
+        if (lastMessageID[i] == transmittedData.messageID)
         {
             criticalProcessSemaphore = false;
             return;
         }
     for (uint8_t i{sizeof(lastMessageID) / 2 - 1}; i >= 1; --i)
         lastMessageID[i] = lastMessageID[i - 1];
-    lastMessageID[0] = incomingData.transmittedData.messageID;
-    memcpy(&incomingData.intermediateSenderMAC, mac, 6);
+    lastMessageID[0] = transmittedData.messageID;
+
+    incoming_data_elem incomingDataElem = DefPool::get_pool().take<incoming_data_t>(transmittedData.important);
+    if (incomingDataElem == nullptr) {
+        ESP_LOGE(TAG, "Failed to receive packet from wire level pool empty len %u important - %d", length, transmittedData.important);
+        return;
+    }
+
+    memcpy(&incomingDataElem->transmittedData, data, sizeof(transmitted_data_t));
+    memcpy(&incomingDataElem->intermediateSenderMAC, mac, 6);
     queueForIncomingData.push(std::move(incomingDataElem));
     criticalProcessSemaphore = false;
 }
 
-uint16_t ZHNetwork::broadcastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, message_type_t type)
+uint16_t ZHNetwork::broadcastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, message_type_t type, bool important)
 {
-    outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>();
+    outgoing_data_elem outgoingData = pool_.take<outgoing_data_t>(important);
     if (outgoingData == nullptr) {
         ESP_LOGW(TAG, "Broadcase failed because of empty pool");
         return ERROR;
@@ -671,17 +689,18 @@ uint16_t ZHNetwork::broadcastMessage(const uint8_t *data, uint8_t size, const ui
     return res.transmittedData.messageID;
 }
 
-uint16_t ZHNetwork::unicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const uint8_t *sender, message_type_t type)
+uint16_t ZHNetwork::unicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const uint8_t *sender, message_type_t type, bool important)
 {
-    outgoing_data_elem outgoingDataElem = pool_.take<outgoing_data_t>();
+    outgoing_data_elem outgoingDataElem = pool_.take<outgoing_data_t>(important);
     if (outgoingDataElem == nullptr) {
-        ESP_LOGW(TAG, "Failed to send unicast pool empty");
+        ESP_LOGW(TAG, "Failed to send unicast pool empty. Important - %d", important);
         return ERROR;
     }
     outgoing_data_t &outgoingData = *outgoingDataElem;
     outgoingData.transmittedData.messageType = type;
     outgoingData.transmittedData.messageID = ((uint16_t)random(32767) << 8) | (uint16_t)random(32767);
     outgoingData.transmittedData.ttl = MAX_LAYERS;
+    outgoingData.transmittedData.important = important;
     memcpy(&outgoingData.transmittedData.netName, &netName_, NET_NAME_SIZE);
     memcpy(&outgoingData.transmittedData.originalTargetMAC, target, 6);
     memcpy(&outgoingData.transmittedData.originalSenderMAC, sender, 6);

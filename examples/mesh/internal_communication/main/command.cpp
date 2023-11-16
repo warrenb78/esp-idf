@@ -217,13 +217,13 @@ uint32_t get_message_count(bool reset)
     return res;
 }
 
-int send_message(const mesh_addr_t *to, message_t &message, size_t size = sizeof(message_t)){
+int send_message(const mesh_addr_t *to, message_t &message, size_t size = sizeof(message_t), bool important = false){
     message.len = size - header_size;
     if (!g_sender) {
         ESP_LOGE(TAG, "Tried to send while sender not set");
         return ESP_FAIL;
     }
-    return g_sender->send(reinterpret_cast<uint8_t *>(&message), size, to->addr);
+    return g_sender->send(reinterpret_cast<uint8_t *>(&message), size, to->addr, important);
 }
 
 static __attribute__((aligned(16))) uint8_t tx_buf[MESH_MTU_SIZE] = { 0, };
@@ -322,6 +322,8 @@ void handle_keep_alive(const mesh_addr_t *from, const message_t *message, size_t
     if (keep_alive.message_index == 0) {
         metrics = {}; // To zero out.
     }
+    if (keep_alive.message_index < metrics.last_message_id)
+        return;
     uint64_t current_time_ms = esp_timer_get_time() / 1000ull;
     if (metrics.count_of_commands == 0) {
         // first time
@@ -480,7 +482,7 @@ int handle_message(const mesh_addr_t *from, const uint8_t *buff, size_t size)
                 memcpy(&dest, message->forward.mac, sizeof(dest));
                 ESP_LOGI(TAG, "Forwarding to %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", 
                     dest.addr[0], dest.addr[1], dest.addr[2], dest.addr[3], dest.addr[4], dest.addr[5]);
-                send_message(&dest, *(message_t*)&message->forward.payload, message->len - fwd_size);
+                send_message(&dest, *(message_t*)&message->forward.payload, message->len - fwd_size, true);
                 ESP_LOGI(TAG, "After sending message to queue");
             }
             break;

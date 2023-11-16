@@ -17,7 +17,7 @@
 
 class ISender {
 public:
-    virtual int send(uint8_t *msg, size_t msg_size, const uint8_t *mac) = 0;
+    virtual int send(uint8_t *msg, size_t msg_size, const uint8_t *mac, uint8_t important = false) = 0;
     virtual size_t get_mtu_size() const = 0;
 };
 
@@ -27,7 +27,7 @@ public:
         return 1460;
     }
 
-    int send(uint8_t *msg, size_t msg_size, const uint8_t *mac) override {
+    int send(uint8_t *msg, size_t msg_size, const uint8_t *mac, uint8_t important = false) override {
         mesh_data_t data;
         data.data = msg;
         data.size = msg_size;
@@ -62,7 +62,7 @@ public:
 
     constexpr static uint8_t BROADCAST[6]{0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
-    int send(uint8_t *msg, size_t msg_size, const uint8_t *mac) override {
+    int send(uint8_t *msg, size_t msg_size, const uint8_t *mac, uint8_t important = false) override {
         // TODO: Decide about confirm parameter policy
         bool confirm = false;
 
@@ -86,15 +86,17 @@ public:
         return 200;
     }
 
-    int send(uint8_t *msg, size_t msg_size, const uint8_t *mac) override {
+    int send(uint8_t *msg, size_t msg_size, const uint8_t *mac, uint8_t important = false) {
         xMessageBufferSend(msgbuf, mac, 6, portMAX_DELAY);
+        xMessageBufferSend(msgbuf, &important, 1, portMAX_DELAY);
         return xMessageBufferSend(msgbuf, msg, msg_size, portMAX_DELAY);
     }
 
-    int receive(uint8_t *msg, size_t msg_size, uint8_t *mac) {
+    int receive(uint8_t *msg, size_t msg_size, uint8_t *mac, uint8_t *important) {
         size_t bytes = xMessageBufferReceive(msgbuf, mac, 6, pdMS_TO_TICKS(10));
         if (bytes == 0)
             return 0;
+        xMessageBufferReceive(msgbuf, important, 1, portMAX_DELAY);
         return xMessageBufferReceive(msgbuf, msg, msg_size, portMAX_DELAY);
     }
 private:

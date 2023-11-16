@@ -19,14 +19,15 @@ static uint8_t mac[6];
 
 void zh_task(void *arg)
 {
+    uint8_t important;
     while (true) {
         network.maintenance();
-        uint8_t bytes = g_sender.receive(buf, sizeof(buf), mac);
+        uint8_t bytes = g_sender.receive(buf, sizeof(buf), mac, &important);
         if (bytes != 0) {
             if (memcmp(mac, network.broadcastMAC, sizeof(network.broadcastMAC)) == 0)
-                network.sendBroadcastMessage(buf, bytes);
+                network.sendBroadcastMessage(buf, bytes, important);
             else
-                network.sendUnicastMessage(buf, bytes, mac);
+                network.sendUnicastMessage(buf, bytes, mac, false, important);
         }
     }
 }

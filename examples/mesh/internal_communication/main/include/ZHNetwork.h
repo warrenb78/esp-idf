@@ -24,6 +24,8 @@
 
 constexpr static size_t NET_NAME_SIZE = 20;
 
+#pragma pack(push, 1)
+
 typedef struct
 {
     uint8_t messageType{0};
@@ -33,8 +35,11 @@ typedef struct
     uint8_t originalTargetMAC[6]{0};
     uint8_t originalSenderMAC[6]{0};
     uint8_t ttl;
+    uint8_t important;
     uint8_t message[200]{0};
 } transmitted_data_t;
+
+#pragma pack(pop)
 
 typedef struct
 {
@@ -114,8 +119,8 @@ public:
 
     error_code_t begin(const char *netName = "", const bool gateway = false);
 
-    uint16_t sendBroadcastMessage(const uint8_t *data, uint8_t size);
-    uint16_t sendUnicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const bool confirm = false);
+    uint16_t sendBroadcastMessage(const uint8_t *data, uint8_t size, bool important = false);
+    uint16_t sendUnicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const bool confirm = false, bool important = false);
 
     void maintenance(void);
 
@@ -167,8 +172,8 @@ private:
     static void onDataSent(const uint8_t *mac, esp_now_send_status_t status);
     static void onDataReceive(const esp_now_recv_info_t *mac, const uint8_t *data, int length);
 #endif
-    uint16_t broadcastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, message_type_t type);
-    uint16_t unicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const uint8_t *sender, message_type_t type);
+    uint16_t broadcastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, message_type_t type, bool important = false);
+    uint16_t unicastMessage(const uint8_t *data, uint8_t size, const uint8_t *target, const uint8_t *sender, message_type_t type, bool important = false);
     on_message_t onBroadcastReceivingCallback;
     on_message_t onUnicastReceivingCallback;
     on_confirm_t onConfirmReceivingCallback;

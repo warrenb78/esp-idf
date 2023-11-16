@@ -73,7 +73,7 @@ private:
         // Lock for multi task usage of pool.
         unique_lock guard(_mutex);
 
-        if (_size >= threshold) // empty pool.
+        if (_size <= threshold) // empty pool.
             return nullptr;
         // Take ownership over the item.
         auto ref = std::move(_pool[_tail]);
